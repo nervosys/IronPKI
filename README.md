@@ -20,7 +20,7 @@ become one implementation.
 | --- | --- |
 | `Purpose` | What a path is validated for: TLS server, TLS client or TPM endorsement key, with its extended-key-usage OID |
 | `TrustAnchor` | A caller-chosen anchor: a certificate, or a key-form anchor with its name constraints |
-| `Limits` | Hard bounds on path length, candidates, anchors, signature checks and certificate size |
+| `Limits` | Hard bounds on path length, candidates, anchors, signature checks and certificate size, with `DEFAULT` (offline) and `ONLINE` (handshake) presets |
 | `Revocation` | Whether revocation is not checked, checked if supplied, or required |
 
 The crate is `no_std` without its default `std` feature, forbids unsafe code

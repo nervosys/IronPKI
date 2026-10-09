@@ -28,7 +28,11 @@ A shared validator must offer all of these before IPG can adopt it:
    that matched the request. rfc822Name constraints also govern
    `emailAddress` attributes in the subject (RFC 5280 section 4.2.1.10).
 4. **Hard work bounds**: path length, candidates, anchors and signature
-   checks. IPG's are 8, 64, 256 and 256 (`Limits::DEFAULT`).
+   checks. IPG's are 8, 64, 256 and 256 (`Limits::DEFAULT`). Path length
+   counts certificates below the anchor, leaf included, which is how both
+   IPG and IronSocketLayer count it. Callers pass `Limits` explicitly;
+   `Limits::ONLINE` keeps IronSocketLayer's 24 signature checks for
+   handshakes, where the peer chooses the chain.
 5. **No network.** No fetching of issuers, CRLs or OCSP responses.
 6. **Caller-supplied time and anchors.** No implicit roots, no system store
    unless the caller asks, and no certificate trusted because the peer sent it.

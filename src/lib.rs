@@ -78,7 +78,8 @@ pub enum TrustAnchor<'a> {
 /// refused; a bound is never silently raised.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Limits {
-    /// The most certificates in a path, leaf and anchor included.
+    /// The most certificates in a path below the trust anchor: the leaf is
+    /// counted and the anchor is not.
     pub max_path_len: usize,
     /// The most intermediate candidates a caller may supply.
     pub max_candidates: usize,
@@ -91,7 +92,8 @@ pub struct Limits {
 }
 
 impl Limits {
-    /// The bounds IronPrivacyGuard's validator enforces today.
+    /// Bounds for offline validation of evidence the caller chose to examine.
+    /// These are the ones IronPrivacyGuard's validator enforces today.
     pub const DEFAULT: Self = Self {
         max_path_len: 8,
         max_candidates: 64,
@@ -100,10 +102,18 @@ impl Limits {
         max_certificate_len: 65_536,
     };
 
-    /// Whether every bound is usable: nonzero, and a path long enough to
-    /// hold a leaf and its issuer.
+    /// Tighter bounds for a live handshake, where a peer chooses the chain
+    /// and each signature check is work it can impose. These are the ones
+    /// IronSocketLayer enforces today: three checks per level of depth.
+    pub const ONLINE: Self = Self {
+        max_signature_checks: 24,
+        ..Self::DEFAULT
+    };
+
+    /// Whether every bound is usable: nonzero, with at least one signature
+    /// check for each certificate in the longest path.
     pub const fn is_valid(&self) -> bool {
-        self.max_path_len >= 2
+        self.max_path_len >= 1
             && self.max_candidates > 0
             && self.max_anchors > 0
             && self.max_signature_checks >= self.max_path_len
@@ -165,10 +175,19 @@ mod tests {
         assert!(!limits.admits(257, 0));
         assert!(!limits.admits(1, 65));
         let unusable = Limits {
-            max_path_len: 1,
+            max_path_len: 0,
             ..Limits::DEFAULT
         };
         assert!(!unusable.is_valid());
+        // The online preset only tightens the default.
+        assert!(Limits::ONLINE.is_valid());
+        assert_eq!(Limits::ONLINE.max_signature_checks, 24);
+        assert_eq!(Limits::ONLINE.max_path_len, Limits::DEFAULT.max_path_len);
+        let starved = Limits {
+            max_signature_checks: 7,
+            ..Limits::DEFAULT
+        };
+        assert!(!starved.is_valid());
     }
 
     #[test]
