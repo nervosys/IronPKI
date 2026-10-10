@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 (2026-10-10)
+
+rfc822Name constraints are evaluated, and 93 more independently generated
+cases hold the validator. No API change.
 
 ### Changed
 - rfc822Name constraints are evaluated (REQ-X509-085), where a path under
