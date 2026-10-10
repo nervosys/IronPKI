@@ -3,12 +3,12 @@
 The IronSecurity stack's certificate layer: one X.509 path validator and
 issuer, built on IronCrypto.
 
-**Status: extraction in progress.** `ironpki::x509` is IronSocketLayer
-0.3.4's certificate code, moved here with its 217 tests: parsing, path
+**Status: 0.1.0, the first release.** `ironpki::x509` is IronSocketLayer
+0.3.4's certificate code, moved here with its tests: parsing, path
 validation, name matching, CRLs, OCSP responses and issuance. It validates
 for a `Purpose`, including a TPM endorsement key, within the caller's
-`Limits`, against the caller's `TrustAnchor`s. Nothing depends on it yet, and
-the crate is not published.
+`Limits`, against the caller's `TrustAnchor`s. IronSocketLayer moves onto it
+in its 0.4.0.
 
 It has not been independently reviewed, and neither it nor IronCrypto is
 FIPS 140-3 validated.
