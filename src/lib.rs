@@ -22,6 +22,8 @@
 extern crate alloc;
 
 pub mod error;
+#[cfg(all(test, feature = "std"))]
+mod hardening_tests;
 pub mod sign;
 #[cfg(test)]
 mod testkey;

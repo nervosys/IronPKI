@@ -31,3 +31,8 @@
 - Accepting a leaf that is itself a trust anchor, without a path, is an
   option, `VerifyOptions::accept_anchor_as_leaf`: on for the TLS purposes,
   as before, and off for an endorsement key (REQ-X509-084).
+- `docs/TRACEABILITY.md` lists the 146 requirements tagged in the source and
+  the tests that verify each; `tests/traceability.rs` fails if a tag has no
+  row, a row has no tag, or a cited test does not exist. Four of
+  IronSocketLayer's certificate hardening tests, which used only this code,
+  moved here with it.

@@ -41,7 +41,9 @@ Done: validation for a `Purpose`, with the TPM endorsement-key leaf rules,
 checked against certificates made with PyCA `cryptography`.
 Done: `TrustAnchor` and `Limits` in the validator's interface; a report that
 names its anchor by subject and key; pinning a leaf as an explicit option.
-Next: the requirement ids and their traceability matrix; evaluating rfc822Name constraints, which
+Done: a traceability matrix, [docs/TRACEABILITY.md](docs/TRACEABILITY.md), of
+146 requirements and the tests that verify them, enforced by a test.
+Next: evaluating rfc822Name constraints, which
 fail a path closed today; then IronSocketLayer and IronPrivacyGuard depend on
 this crate in place of their own copies.
 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) lists what IronPrivacyGuard needs
@@ -55,6 +57,7 @@ cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo test --locked --workspace --all-features
 cargo test --locked --workspace --no-default-features
 python scripts/check-first-party-only.py --all-features
+cargo build --no-default-features --target thumbv7em-none-eabihf
 ```
 
 ## Licence

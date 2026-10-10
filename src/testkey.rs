@@ -169,7 +169,7 @@ enum KeyImpl {
     MlDsa(MlDsa, SecretVec),
 }
 
-/// A private key that can sign handshakes. `REQ-SIG-003`: key bytes are
+/// A private key that can sign handshakes. key bytes are
 /// zeroized on drop.
 pub struct SigningKey {
     inner: KeyImpl,
@@ -235,7 +235,7 @@ pub fn push_tlv(out: &mut Vec<u8>, tag: u8, body: &[u8]) {
 }
 
 impl SigningKey {
-    /// Sign into caller storage using the initialized key. `REQ-FIX-002`.
+    /// Sign into caller storage using the initialized key.
     /// No allocation occurs; `out` must accommodate the scheme's largest signature.
     pub fn sign_into(
         &self,
@@ -320,7 +320,7 @@ impl SigningKey {
     ///
     /// Accepts P-256, P-384, P-521, Ed25519, RSA (2048–4096 bits), and
     /// ML-DSA-65 in the seed form of draft-ietf-lamps-dilithium-certificates,
-    /// or seed and expanded key together, which must agree. `REQ-SIG-004`.
+    /// or seed and expanded key together, which must agree.
     pub fn from_pkcs8_der(der_bytes: &[u8]) -> Result<Self> {
         // ic_pkix reads the PrivateKeyInfo; a file it refuses is malformed.
         // ML-DSA, which PrivateKeyInfo reports as unsupported, has its own
@@ -486,7 +486,7 @@ impl SigningKey {
     }
 
     /// An ML-DSA-44 key from its 32-byte seed (FIPS 204 `ξ`).
-    /// REQ-SIG-005: ML-DSA-44 generation, key loading, signing and verification
+    /// ML-DSA-44 generation, key loading, signing and verification
     /// use IronCrypto's category 2 parameter set and RFC 9881 identifiers.
     pub fn mldsa44_from_seed(seed: &[u8; 32]) -> Result<Self> {
         Self::mldsa_from_seed(MlDsa::P44, seed)
@@ -570,7 +570,7 @@ impl SigningKey {
     }
 
     /// Schemes this key can sign a handshake with, most preferred first.
-    /// `REQ-SIG-002`: never PKCS#1 v1.5.
+    /// never PKCS#1 v1.5.
     pub fn schemes(&self) -> &'static [SignatureScheme] {
         use SignatureScheme as S;
         match &self.inner {
