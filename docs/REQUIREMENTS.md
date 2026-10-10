@@ -78,4 +78,5 @@ Known from its 0.3.3 behaviour:
 - Whether TPM key-attestation verification (IPG's `src/attest.rs`) belongs
   here or stays in IPG.
 - How certificate policies are handled. IPG does not process the policy tree.
-- Whether IronPKI offers a commercial licence alongside AGPL-3.0-or-later.
+- Decided 2026-10-10: IronPKI offers a commercial licence alongside
+  AGPL-3.0-or-later, with a CLA, as IronSocketLayer and IronCrypto do.

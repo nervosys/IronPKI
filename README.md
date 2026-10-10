@@ -62,5 +62,7 @@ cargo build --no-default-features --target thumbv7em-none-eabihf
 
 ## Licence
 
-AGPL-3.0-or-later; see [LICENSE](LICENSE). Whether a commercial licence is
-also offered is the maintainer's decision and is not stated here.
+AGPL-3.0-or-later; see [LICENSE](LICENSE). A commercial licence is available
+from NERVOSYS: see [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md).
+Contributions are accepted under the [CLA](CLA.md); see
+[CONTRIBUTING.md](CONTRIBUTING.md).

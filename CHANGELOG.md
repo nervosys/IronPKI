@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 (unreleased)
+
+The first version. Not yet published.
 
 - Scaffolded IronPKI: workspace, licence, CI, dependency policy, the initial
   types and the design notes in `docs/`. Not published.

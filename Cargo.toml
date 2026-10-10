@@ -1,15 +1,16 @@
 [package]
 name = "ironpki"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
 license = "AGPL-3.0-or-later"
-description = "The IronSecurity stack's certificate layer: one X.509 path validator and issuer over IronCrypto"
+description = "X.509 path validation, CRLs, OCSP responses and issuance in pure Rust over IronCrypto, for TLS and TPM endorsement-key certificates"
 repository = "https://github.com/nervosys/IronPKI"
 readme = "README.md"
 keywords = ["x509", "pki", "certificates", "cryptography"]
 categories = ["cryptography", "no-std"]
-# A scaffold: not for publication until a validator is extracted into it.
+# Not published until the export question in docs/EXPORT.md is decided and,
+# if a notice is sent, recorded. docs/RELEASING.md has the order.
 publish = false
 
 [dependencies]
