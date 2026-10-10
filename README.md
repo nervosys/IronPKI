@@ -3,9 +3,14 @@
 The IronSecurity stack's certificate layer: one X.509 path validator and
 issuer, built on IronCrypto.
 
-**Status: scaffold.** IronPKI does not parse or validate a certificate yet.
-It holds the contract a shared validator must meet, as tested types, and the
-requirements its consumers have. The crate is not published.
+**Status: extraction in progress.** `ironpki::x509` is IronSocketLayer
+0.3.4's certificate code, moved here with its 217 tests: parsing, path
+validation, name matching, CRLs, OCSP responses and issuance. It does not yet
+use the contract types below, has no TPM endorsement-key purpose, and nothing
+depends on it. The crate is not published.
+
+It has not been independently reviewed, and neither it nor IronCrypto is
+FIPS 140-3 validated.
 
 ## Why it exists
 
@@ -23,13 +28,17 @@ become one implementation.
 | `Limits` | Hard bounds on path length, candidates, anchors, signature checks and certificate size, with `DEFAULT` (offline) and `ONLINE` (handshake) presets |
 | `Revocation` | Whether revocation is not checked, checked if supplied, or required |
 
-The crate is `no_std` without its default `std` feature, forbids unsafe code
-and has no dependencies yet.
+The crate is `no_std` with `alloc` without its default `std` feature, forbids
+unsafe code, and depends only on IronCrypto (`ic-core`, `ic-sig`, `ic-pkix`,
+`ic-hash`, 0.2.20 or later). Signatures are verified by `ic-sig`; nothing
+here implements a primitive.
 
 ## Plan
 
-The validator is to be extracted from IronSocketLayer by that project's
-session, with IronCrypto's issuance joining it.
+Done: IronSocketLayer's validator moved here and passing its tests.
+Next: its options take `Purpose`, `TrustAnchor` and `Limits`; the TPM
+endorsement-key purpose; the requirement ids and their traceability matrix;
+then IronSocketLayer depends on this crate in place of its own copy.
 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) lists what IronPrivacyGuard needs
 before it can move onto the shared validator.
 

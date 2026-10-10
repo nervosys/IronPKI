@@ -6,12 +6,28 @@
 //!
 //! # Status
 //!
-//! This is a scaffold. It holds the contract a shared validator must meet,
-//! as types: what a caller asks for ([`Purpose`]), what it supplies
+//! The extraction is in progress. [`x509`] is IronSocketLayer 0.3.4's
+//! certificate code, moved here with its tests: parsing, path validation,
+//! name matching, CRLs, OCSP responses and issuance. It verifies through
+//! IronCrypto's `ic-sig`, signs through any `ic_core::sig::Signer`, and has
+//! its own [`Error`]. It still speaks in IronSocketLayer's terms: its
+//! `Usage` knows only TLS server and client, and its bounds are constants.
+//!
+//! The types at the root are the contract the finished validator is to
+//! meet: what a caller asks for ([`Purpose`]), what it supplies
 //! ([`TrustAnchor`]), and the work bounds no input may exceed ([`Limits`]).
-//! It does not parse or validate a certificate yet. The validator is to be
-//! extracted from IronSocketLayer; see `docs/REQUIREMENTS.md`.
+//! [`x509`] does not use them yet. See `docs/REQUIREMENTS.md`.
 #![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+pub mod error;
+pub mod sign;
+#[cfg(test)]
+mod testkey;
+pub mod x509;
+
+pub use error::{Error, ErrorKind, Result};
 
 /// What a certificate path is validated for. A path valid for one purpose
 /// says nothing about another.
