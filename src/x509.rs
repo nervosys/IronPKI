@@ -44,6 +44,7 @@ use ic_core::traits::RandomSource;
 
 use ic_core::sig::Signer;
 
+use crate::Purpose;
 use crate::error::{Error, ErrorKind, Result};
 #[cfg(test)]
 use crate::sign::SigningKey;
@@ -86,7 +87,9 @@ const OID_EXT_CP: &[u8] = &[0x55, 0x1d, 0x20];
 const OID_EXT_AKI: &[u8] = &[0x55, 0x1d, 0x23];
 const OID_EXT_EKU: &[u8] = &[0x55, 0x1d, 0x25];
 
+#[cfg(test)]
 const OID_KP_SERVER_AUTH: &[u8] = &[0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x01];
+#[cfg(test)]
 const OID_KP_CLIENT_AUTH: &[u8] = &[0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x02];
 const OID_ANY_EKU: &[u8] = &[0x55, 0x1d, 0x25, 0x00];
 
@@ -746,24 +749,6 @@ fn is_valid_dns_name(name: &str, allow_wildcard: bool) -> bool {
     })
 }
 
-/// The purpose a certificate is being verified for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Usage {
-    /// A TLS server (id-kp-serverAuth).
-    ServerAuth,
-    /// A TLS client (id-kp-clientAuth).
-    ClientAuth,
-}
-
-impl Usage {
-    const fn oid(self) -> &'static [u8] {
-        match self {
-            Self::ServerAuth => OID_KP_SERVER_AUTH,
-            Self::ClientAuth => OID_KP_CLIENT_AUTH,
-        }
-    }
-}
-
 fn name_common_name(name_der: &[u8]) -> Option<&str> {
     let mut outer = Der::new(name_der);
     let mut rdns = outer.nested(T_SEQUENCE).ok()?;
@@ -1056,14 +1041,17 @@ impl<'a> Certificate<'a> {
         Ok(())
     }
 
-    fn check_eku(&self, usage: Usage) -> Result<()> {
+    fn check_eku(&self, usage: Purpose) -> Result<()> {
         let Some(eku) = self.ext.eku else {
             return Ok(());
         };
         let mut r = Der::new(eku);
         while !r.is_empty() {
             let oid = r.expect(T_OID)?;
-            if oid == usage.oid() || oid == OID_ANY_EKU {
+            // anyExtendedKeyUsage stands for a TLS purpose, as it always
+            // has here. It does not stand for an endorsement key: a TPM
+            // vendor's CA names that purpose or none.
+            if oid == usage.eku_der() || (usage.leaf_signs() && oid == OID_ANY_EKU) {
                 return Ok(());
             }
         }
@@ -1758,7 +1746,7 @@ pub struct VerifyOptions<'s> {
     /// The current time, Unix seconds.
     pub now: u64,
     /// What the leaf is being accepted for.
-    pub usage: Usage,
+    pub usage: Purpose,
     /// Signature schemes permitted on certificate links. `REQ-X509-005`.
     pub allowed_schemes: &'s [SignatureScheme],
     /// Most certificates on a path, leaf included, anchor excluded.
@@ -1774,7 +1762,7 @@ pub struct VerifyOptions<'s> {
 
 impl<'s> VerifyOptions<'s> {
     /// Options with the defaults: depth 8, RSA at least 2048 bits.
-    pub fn new(now: u64, usage: Usage, allowed_schemes: &'s [SignatureScheme]) -> Self {
+    pub fn new(now: u64, usage: Purpose, allowed_schemes: &'s [SignatureScheme]) -> Self {
         Self {
             now,
             usage,
@@ -2338,6 +2326,28 @@ impl<'c> Search<'c, '_, '_> {
     }
 }
 
+/// What [`ChainReport::leaf_key`] says of a leaf key that was not read: an
+/// endorsement key of a kind this crate verifies no signature with.
+pub const UNEXAMINED_KEY: &str = "unexamined";
+
+/// The leaf's key, checked against the caller's key policy, or `None` for a
+/// leaf whose purpose is not signing and whose key is of a kind this crate
+/// does not verify with (a TPM endorsement key marked RSAES-OAEP, say).
+/// Such a key is never used here, so nothing is claimed about it.
+/// `REQ-X509-080`.
+fn leaf_key<'a>(leaf: &Certificate<'a>, opts: &VerifyOptions<'_>) -> Result<Option<PublicKey<'a>>> {
+    match leaf.subject_public_key() {
+        Ok(key) => {
+            check_key_policy(&key, opts)?;
+            Ok(Some(key))
+        }
+        Err(e) if !opts.usage.leaf_signs() && e.kind() == ErrorKind::UnsupportedCertificate => {
+            Ok(None)
+        }
+        Err(e) => Err(e),
+    }
+}
+
 /// Verify that `end_entity` chains to an anchor in `roots` for `opts.usage`.
 ///
 /// `intermediates` may be in any order and may contain unrelated or
@@ -2364,7 +2374,8 @@ pub fn verify_chain(
         ));
     }
     leaf.check_validity(opts.now)?;
-    if let Some(ku) = leaf.ext.key_usage
+    if opts.usage.leaf_signs()
+        && let Some(ku) = leaf.ext.key_usage
         && ku & KU_DIGITAL_SIGNATURE == 0
     {
         return Err(Error::new(
@@ -2373,16 +2384,15 @@ pub fn verify_chain(
         ));
     }
     leaf.check_eku(opts.usage)?;
-    let leaf_key = leaf.subject_public_key()?;
-    check_key_policy(&leaf_key, opts)?;
+    let leaf_key = leaf_key(&leaf, opts)?;
 
     let mut report = ChainReport {
         depth: 0,
-        leaf_key: leaf_key.kind_id(),
+        leaf_key: leaf_key.map_or(UNEXAMINED_KEY, |k| k.kind_id()),
         schemes: Vec::new(),
         leaf_not_after: leaf.not_after,
         anchor_subject_cn: None,
-        min_classical_bits: leaf_key.classical_bits(),
+        min_classical_bits: leaf_key.map_or(u16::MAX, |k| k.classical_bits()),
         issuer_subject: leaf.issuer.to_vec(),
         issuer_spki: leaf.spki.to_vec(),
         crl_checked: false,
@@ -2395,6 +2405,10 @@ pub fn verify_chain(
         .find(|a| a.subject == leaf.subject && a.spki == leaf.spki)
     {
         report.anchor_subject_cn = name_common_name(&a.subject).map(String::from);
+        if leaf_key.is_none() {
+            // No key on this path was examined at all.
+            report.min_classical_bits = 0;
+        }
         return Ok(report);
     }
 
@@ -2501,15 +2515,16 @@ pub fn check_leaf_fixed(der: &[u8], opts: &VerifyOptions<'_>) -> Result<()> {
     // Validity before key usage, in the order `verify_chain` checks them, so
     // both validators refuse a leaf failing both for the same reason.
     leaf.check_validity(opts.now)?;
-    if leaf
-        .ext
-        .key_usage
-        .is_some_and(|ku| ku & KU_DIGITAL_SIGNATURE == 0)
+    if opts.usage.leaf_signs()
+        && leaf
+            .ext
+            .key_usage
+            .is_some_and(|ku| ku & KU_DIGITAL_SIGNATURE == 0)
     {
         return Err(cannot_sign());
     }
     leaf.check_eku(opts.usage)?;
-    check_key_policy(&leaf.subject_public_key()?, opts)
+    leaf_key(&leaf, opts).map(|_| ())
 }
 
 /// Verify a certificate path using fixed slots. `REQ-FIX-003`.
@@ -2537,7 +2552,7 @@ pub fn verify_chain_fixed<'a>(
         crl_checked: false,
         schemes: [None; 8],
         depth: 0,
-        min_classical_bits: leaf.subject_public_key()?.classical_bits(),
+        min_classical_bits: leaf_key(&leaf, opts)?.map_or(u16::MAX, |k| k.classical_bits()),
         issuer_subject: leaf.issuer,
         issuer_spki: leaf.spki,
     };
@@ -2817,7 +2832,7 @@ pub struct CertificateParams<'a> {
     /// Path length constraint; setting this requires `is_ca` to be true.
     pub path_len: Option<u8>,
     /// Extended key usages; empty for none.
-    pub usage: &'a [Usage],
+    pub usage: &'a [Purpose],
     /// Serial number; made positive and minimal on encoding.
     pub serial: [u8; 16],
 }
@@ -2973,7 +2988,7 @@ fn build(
     if !params.usage.is_empty() {
         let mut body = Vec::new();
         for u in params.usage {
-            push_tlv(&mut body, T_OID, u.oid());
+            push_tlv(&mut body, T_OID, u.eku_der());
         }
         let mut v = Vec::new();
         push_tlv(&mut v, T_SEQUENCE, &body);
@@ -7014,7 +7029,7 @@ mod chain_tests {
             not_after: NOW + 365 * DAY,
             is_ca: ca,
             path_len: None,
-            usage: if ca { &[] } else { &[Usage::ServerAuth] },
+            usage: if ca { &[] } else { &[Purpose::TlsServer] },
             serial: [0x42; 16],
         }
     }
@@ -7022,7 +7037,7 @@ mod chain_tests {
     const ALL: &[SignatureScheme] = sign::VERIFY_SCHEMES;
 
     fn opts() -> VerifyOptions<'static> {
-        VerifyOptions::new(NOW, Usage::ServerAuth, ALL)
+        VerifyOptions::new(NOW, Purpose::TlsServer, ALL)
     }
 
     struct Pki {
@@ -7484,7 +7499,7 @@ mod chain_tests {
                     let parsed = Certificate::parse(&leaf);
                     if valid {
                         assert_eq!(parsed.unwrap().ext.eku, Some(body.as_slice()));
-                        for usage in [Usage::ServerAuth, Usage::ClientAuth] {
+                        for usage in [Purpose::TlsServer, Purpose::TlsClient] {
                             let options = VerifyOptions::new(NOW, usage, ALL);
                             verify_both(&leaf, &[&p.int], &p.roots, &options).unwrap();
                         }
@@ -8423,7 +8438,7 @@ mod chain_tests {
     #[test]
     fn schemes_outside_the_policy_are_refused() {
         let p = pki([KeyKind::EcdsaP256; 3]);
-        let o = VerifyOptions::new(NOW, Usage::ServerAuth, &[SignatureScheme::Ed25519]);
+        let o = VerifyOptions::new(NOW, Purpose::TlsServer, &[SignatureScheme::Ed25519]);
         assert_eq!(
             err(verify_both(&p.leaf, &[&p.int], &p.roots, &o)),
             ErrorKind::PolicyViolation
@@ -8433,7 +8448,7 @@ mod chain_tests {
     #[test]
     fn extended_key_usage_must_permit_the_use() {
         let p = pki([KeyKind::EcdsaP256; 3]);
-        let o = VerifyOptions::new(NOW, Usage::ClientAuth, ALL);
+        let o = VerifyOptions::new(NOW, Purpose::TlsClient, ALL);
         assert_eq!(
             err(verify_both(&p.leaf, &[&p.int], &p.roots, &o)),
             ErrorKind::CertificateUsage
@@ -8600,6 +8615,104 @@ mod chain_tests {
         let mut out = Vec::new();
         push_tlv(&mut out, T_SEQUENCE, &body);
         out
+    }
+
+    /// REQ-X509-080: a TPM endorsement-key certificate is validated as what
+    /// it is. It must name the endorsement-key purpose in its extended key
+    /// usage if it has one, and anyExtendedKeyUsage does not stand for it;
+    /// its key usage need not allow signing; and its key may be of a kind
+    /// no signature is verified with, in which case the report says the key
+    /// was not examined and counts only the issuers' strength. The same
+    /// certificate is refused as a TLS server, and a TLS certificate is
+    /// refused as an endorsement key.
+    #[test]
+    fn an_endorsement_key_leaf_is_held_to_its_own_rules() {
+        let mut r = rng();
+        let p = pki([KeyKind::EcdsaP256; 3]);
+        let ek = VerifyOptions::new(NOW, Purpose::TpmEndorsementKey, ALL);
+        let ek_key = SigningKey::generate(KeyKind::EcdsaP256, &mut r).unwrap();
+        let mut ek_params = params("TPM", &[], false);
+        ek_params.usage = &[Purpose::TpmEndorsementKey];
+        let leaf = issue(&ek_params, ek_key.spki(), &p.int, &p.int_key, &mut r).unwrap();
+
+        let report = verify_both(&leaf, &[&p.int], &p.roots, &ek).unwrap();
+        assert_eq!(report.leaf_key, "ecdsa-p256");
+        assert_eq!(report.depth, 2);
+        assert_eq!(
+            err(verify_both(&leaf, &[&p.int], &p.roots, &opts())),
+            ErrorKind::CertificateUsage,
+            "an endorsement key is not a TLS server"
+        );
+        assert_eq!(
+            err(verify_both(&p.leaf, &[&p.int], &p.roots, &ek)),
+            ErrorKind::CertificateUsage,
+            "a TLS server is not an endorsement key"
+        );
+
+        // keyEncipherment only: what an RSA endorsement key carries.
+        let decrypts = resign(
+            &leaf,
+            &p.int_key,
+            &[0x03, 0x02, 0x07, 0x80],
+            &[0x03, 0x02, 0x05, 0x20],
+        );
+        verify_both(&decrypts, &[&p.int], &p.roots, &ek).unwrap();
+
+        // A key algorithm no signature is verified with (the last arc of
+        // id-ecPublicKey changed): not read, and said to be unread.
+        let foreign = resign(
+            &leaf,
+            &p.int_key,
+            &[0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01],
+            &[0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x7f],
+        );
+        let report = verify_both(&foreign, &[&p.int], &p.roots, &ek).unwrap();
+        assert_eq!(report.leaf_key, UNEXAMINED_KEY);
+        assert_eq!(report.min_classical_bits, 128, "the two P-256 issuers");
+        // As a TLS leaf, whose key must sign, the same key is unsupported
+        // whatever else is wrong with the certificate.
+        let mut tls_params = params("x", &["x.example.com"], false);
+        tls_params.serial = [0x43; 16];
+        let tls_key = SigningKey::generate(KeyKind::EcdsaP256, &mut r).unwrap();
+        let tls = issue(&tls_params, tls_key.spki(), &p.int, &p.int_key, &mut r).unwrap();
+        let tls_foreign = resign(
+            &tls,
+            &p.int_key,
+            &[0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01],
+            &[0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x7f],
+        );
+        assert_eq!(
+            err(verify_both(&tls_foreign, &[&p.int], &p.roots, &opts())),
+            ErrorKind::UnsupportedCertificate
+        );
+
+        // anyExtendedKeyUsage alone: a TLS server, as before, and not an
+        // endorsement key.
+        let mut any = Vec::new();
+        push_tlv(&mut any, T_OID, OID_ANY_EKU);
+        let mut list = Vec::new();
+        push_tlv(&mut list, T_SEQUENCE, &any);
+        let mut ext = Vec::new();
+        push_ext(&mut ext, OID_EXT_EKU, false, &list);
+        let mut any_params = params("any", &["any.example.com"], false);
+        any_params.usage = &[];
+        let int = Certificate::parse(&p.int).unwrap();
+        let any_key = SigningKey::generate(KeyKind::EcdsaP256, &mut r).unwrap();
+        let any_leaf = build(
+            &any_params,
+            any_key.spki(),
+            int.subject_der(),
+            &key_identifier(int.spki_der()).unwrap(),
+            &p.int_key,
+            &mut r,
+            &[ext],
+        )
+        .unwrap();
+        verify_both(&any_leaf, &[&p.int], &p.roots, &opts()).unwrap();
+        assert_eq!(
+            err(verify_both(&any_leaf, &[&p.int], &p.roots, &ek)),
+            ErrorKind::CertificateUsage
+        );
     }
 
     /// REQ-X509-*: key usage must permit each certificate's role. A leaf
@@ -8979,7 +9092,7 @@ mod chain_tests {
             &[ext],
         )
         .unwrap();
-        for usage in [Usage::ServerAuth, Usage::ClientAuth] {
+        for usage in [Purpose::TlsServer, Purpose::TlsClient] {
             let o = VerifyOptions::new(NOW, usage, ALL);
             verify_both(&leaf, &[&p.int], &p.roots, &o).unwrap();
         }

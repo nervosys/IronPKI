@@ -625,7 +625,7 @@ pub fn build(
 mod tests {
     use super::*;
     use crate::sign::KeyKind;
-    use crate::x509::{self, CertificateParams, Usage};
+    use crate::x509::{self, CertificateParams, Purpose};
 
     struct Fx {
         ca: Vec<u8>,
@@ -664,7 +664,7 @@ mod tests {
                 not_after: now + 86_400,
                 is_ca: false,
                 path_len: None,
-                usage: &[Usage::ClientAuth],
+                usage: &[Purpose::TlsClient],
                 serial: [3; 16],
             },
             key.spki(),
@@ -2874,7 +2874,7 @@ AAAA
                 not_after: f.now + 86_400,
                 is_ca: false,
                 path_len: None,
-                usage: &[Usage::ServerAuth],
+                usage: &[Purpose::TlsServer],
                 serial: [5; 16],
             },
             &key,

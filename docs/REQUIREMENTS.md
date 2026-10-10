@@ -42,6 +42,19 @@ A shared validator must offer all of these before IPG can adopt it:
 IPG gains revocation checking, which it does not have today, if it can supply
 CRLs or OCSP responses it obtained itself.
 
+## Status against IronPrivacyGuard's requirements
+
+| # | Requirement | State |
+| --- | --- | --- |
+| 1 | TPM EK-certificate purpose | Done: `Purpose::TpmEndorsementKey`, REQ-X509-080, `tests/endorsement_key.rs` |
+| 2 | Fail closed on what is not evaluated | Done for unknown critical extensions and for name-constraint forms other than dNSName and iPAddress. How a wildcard DNS name is treated under a DNS constraint has not been compared with IPG, which refuses it |
+| 3 | Every name checked; rfc822Name constraints | Not done: an rfc822Name constraint fails the path closed, and subject `emailAddress` attributes are not collected |
+| 4 | Hard work bounds | Enforced as constants (depth 8, 24 signature checks, 64 extensions); not yet taken from `Limits` |
+| 5 | No network | Done: nothing is fetched |
+| 6 | Caller-supplied time and anchors | Done, except that `RootStore::from_system` exists behind the `std` feature and is used only when called |
+| 7 | Key-form trust anchors with name constraints | Done: `RootStore::add_anchor`; not yet through `TrustAnchor` |
+| 8 | No unsafe code, IronCrypto the only dependency | Done |
+
 ## Requirements from IronSocketLayer
 
 To be written by IronSocketLayer's session when it extracts the validator.

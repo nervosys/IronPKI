@@ -50,6 +50,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "ic-json"
+version = "0.2.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b1887b03d5dab94a693f4c017721c4b7dc80623ff677e5751e4a074d25f908a"
+
+[[package]]
 name = "ic-lms"
 version = "0.2.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -133,6 +139,7 @@ dependencies = [
  "ic-drbg",
  "ic-ec",
  "ic-hash",
+ "ic-json",
  "ic-mldsa",
  "ic-pkix",
  "ic-rsa",

@@ -10,13 +10,14 @@
 //! certificate code, moved here with its tests: parsing, path validation,
 //! name matching, CRLs, OCSP responses and issuance. It verifies through
 //! IronCrypto's `ic-sig`, signs through any `ic_core::sig::Signer`, and has
-//! its own [`Error`]. It still speaks in IronSocketLayer's terms: its
-//! `Usage` knows only TLS server and client, and its bounds are constants.
+//! its own [`Error`]. It validates for a [`Purpose`]: a TLS server, a TLS
+//! client, or a TPM endorsement key.
 //!
-//! The types at the root are the contract the finished validator is to
-//! meet: what a caller asks for ([`Purpose`]), what it supplies
-//! ([`TrustAnchor`]), and the work bounds no input may exceed ([`Limits`]).
-//! [`x509`] does not use them yet. See `docs/REQUIREMENTS.md`.
+//! [`TrustAnchor`] and [`Limits`] are the rest of the contract the finished
+//! validator is to meet: what a caller supplies, and the work bounds no
+//! input may exceed. [`x509`] does not use those two yet; its anchors live
+//! in its `RootStore` and its bounds are constants. See
+//! `docs/REQUIREMENTS.md`.
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
@@ -58,6 +59,27 @@ impl Purpose {
     /// The purpose with this identifier.
     pub fn from_id(id: &str) -> Option<Self> {
         Self::ALL.iter().copied().find(|p| p.id() == id)
+    }
+
+    /// The extended-key-usage OID of this purpose, as DER content bytes.
+    pub(crate) const fn eku_der(self) -> &'static [u8] {
+        match self {
+            Self::TlsServer => &[0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x01],
+            Self::TlsClient => &[0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x02],
+            Self::TpmEndorsementKey => &[0x67, 0x81, 0x05, 0x08, 0x01],
+        }
+    }
+
+    /// Whether the leaf's key signs for this purpose. A TLS peer proves
+    /// possession of its key by signing the handshake, so its certificate
+    /// must allow `digitalSignature` and its key must be one this crate
+    /// verifies with. A TPM endorsement key decrypts; it signs nothing, and
+    /// its key may be of a kind no signature is ever checked with.
+    pub const fn leaf_signs(self) -> bool {
+        match self {
+            Self::TlsServer | Self::TlsClient => true,
+            Self::TpmEndorsementKey => false,
+        }
     }
 
     /// The extended-key-usage OID a leaf must carry for this purpose, as

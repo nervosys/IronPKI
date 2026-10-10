@@ -840,7 +840,7 @@ fn sign_response(
 mod tests {
     use super::*;
     use crate::sign::KeyKind;
-    use crate::x509::{self, CertificateParams, Usage};
+    use crate::x509::{self, CertificateParams, Purpose};
 
     struct Fixture {
         ca: Vec<u8>,
@@ -879,7 +879,7 @@ mod tests {
                 not_after: now + 86_400,
                 is_ca: false,
                 path_len: None,
-                usage: &[Usage::ServerAuth],
+                usage: &[Purpose::TlsServer],
                 serial: [4; 16],
             },
             leaf_key.spki(),
@@ -2439,7 +2439,7 @@ mod tests {
                 not_after: f.now + 3600,
                 is_ca: false,
                 path_len: None,
-                usage: &[Usage::ServerAuth],
+                usage: &[Purpose::TlsServer],
                 serial: [5; 16],
             },
             key.spki(),
