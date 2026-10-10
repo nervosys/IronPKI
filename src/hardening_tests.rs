@@ -310,3 +310,260 @@ fn a_certificate_with_thousands_of_extensions_is_refused_quickly() {
         "took {took:?}"
     );
 }
+
+/// `NameConstraints` with permitted and excluded subtrees of any forms.
+fn constraints(permitted: &[(u8, &[u8])], excluded: &[(u8, &[u8])]) -> Vec<u8> {
+    let list = |entries: &[(u8, &[u8])]| -> Vec<u8> {
+        entries
+            .iter()
+            .flat_map(|(t, v)| tlv(0x30, &tlv(*t, v)))
+            .collect()
+    };
+    let mut body = Vec::new();
+    if !permitted.is_empty() {
+        body.extend(tlv(0xa0, &list(permitted)));
+    }
+    if !excluded.is_empty() {
+        body.extend(tlv(0xa1, &list(excluded)));
+    }
+    ext(&[0x55, 0x1d, 0x1e], true, &tlv(0x30, &body))
+}
+
+/// A subject of a common name and, after it, emailAddress attributes.
+fn name_with_emails(cn: &str, emails: &[&[u8]]) -> Vec<u8> {
+    let cn_atv = [tlv(0x06, &[0x55, 0x04, 0x03]), tlv(0x0c, cn.as_bytes())].concat();
+    let mut rdns = tlv(0x31, &tlv(0x30, &cn_atv));
+    for email in emails {
+        let atv = [
+            tlv(
+                0x06,
+                &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x09, 0x01],
+            ),
+            tlv(0x16, email),
+        ]
+        .concat();
+        rdns.extend(tlv(0x31, &tlv(0x30, &atv)));
+    }
+    tlv(0x30, &rdns)
+}
+
+/// A root, an intermediate carrying `nc`, and the verdict of both validators
+/// on a leaf with `subject` and `san_entries` issued under it.
+struct Constrained {
+    int: Vec<u8>,
+    int_key: SigningKey,
+    leaf_key: SigningKey,
+    roots: RootStore,
+}
+
+impl Constrained {
+    fn new(nc: Vec<u8>) -> Self {
+        let (root_key, int_key, leaf_key) = (key(), key(), key());
+        let root = cert(
+            1,
+            &name("Root"),
+            &name("Root"),
+            root_key.spki(),
+            &[basic_constraints(true), key_usage(true)],
+            &root_key,
+        );
+        let int = cert(
+            2,
+            &name("Root"),
+            &name("Int"),
+            int_key.spki(),
+            &[basic_constraints(true), key_usage(true), nc],
+            &root_key,
+        );
+        let mut roots = RootStore::new();
+        roots.add_der(&root).unwrap();
+        Self {
+            int,
+            int_key,
+            leaf_key,
+            roots,
+        }
+    }
+
+    fn verdict(&self, subject: &[u8], san_entries: &[(u8, &[u8])]) -> Option<ErrorKind> {
+        let mut exts = vec![basic_constraints(false), key_usage(false)];
+        if !san_entries.is_empty() {
+            exts.push(san(san_entries));
+        }
+        let leaf = cert(
+            3,
+            &name("Int"),
+            subject,
+            self.leaf_key.spki(),
+            &exts,
+            &self.int_key,
+        );
+        let (owned, fixed) = verdicts(&leaf, &[&self.int], &self.roots);
+        assert_eq!(owned, fixed, "the two validators disagree");
+        owned
+    }
+}
+
+const VIOLATION: Option<ErrorKind> = Some(ErrorKind::CertificateUsage);
+const UNSUPPORTED: Option<ErrorKind> = Some(ErrorKind::UnsupportedCertificate);
+
+/// REQ-X509-085: an rfc822Name constraint is evaluated, for rfc822Name
+/// alternative names and for emailAddress attributes of the subject alike
+/// (RFC 5280 §4.2.1.10): a host names every mailbox at that host, a leading
+/// dot every mailbox at a host below the domain and not at the domain, and a
+/// mailbox that mailbox alone, with the local part compared exactly. An
+/// address or constraint there is no rule for refuses the path.
+#[test]
+fn rfc822_name_constraints_are_evaluated() {
+    let leaf = name("leaf");
+
+    // Permitted: one host.
+    let host = Constrained::new(constraints(&[(0x81, b"example.com")], &[]));
+    assert_eq!(host.verdict(&leaf, &[(0x81, b"a@example.com")]), None);
+    assert_eq!(host.verdict(&leaf, &[(0x81, b"a@EXAMPLE.com")]), None);
+    assert_eq!(
+        host.verdict(&leaf, &[(0x81, b"a@mail.example.com")]),
+        VIOLATION
+    );
+    assert_eq!(host.verdict(&leaf, &[(0x81, b"a@other.org")]), VIOLATION);
+    // A certificate with no address is not what the constraint is about.
+    assert_eq!(host.verdict(&leaf, &[(0x82, b"www.other.org")]), None);
+    // The subject's emailAddress is an address too, wherever else one is.
+    assert_eq!(
+        host.verdict(&name_with_emails("leaf", &[b"a@example.com"]), &[]),
+        None
+    );
+    assert_eq!(
+        host.verdict(&name_with_emails("leaf", &[b"a@other.org"]), &[]),
+        VIOLATION
+    );
+    assert_eq!(
+        host.verdict(
+            &name_with_emails("leaf", &[b"a@other.org"]),
+            &[(0x81, b"a@example.com")]
+        ),
+        VIOLATION,
+        "a good alternative name does not excuse a subject address"
+    );
+    // No rule for an address without a mailbox, so no verdict to give.
+    assert_eq!(host.verdict(&leaf, &[(0x81, b"example.com")]), UNSUPPORTED);
+    assert_eq!(host.verdict(&leaf, &[(0x81, b"@example.com")]), UNSUPPORTED);
+
+    // Permitted: hosts below a domain, and not the domain.
+    let below = Constrained::new(constraints(&[(0x81, b".example.com")], &[]));
+    assert_eq!(below.verdict(&leaf, &[(0x81, b"a@mail.example.com")]), None);
+    assert_eq!(below.verdict(&leaf, &[(0x81, b"a@example.com")]), VIOLATION);
+    assert_eq!(
+        below.verdict(&leaf, &[(0x81, b"a@notexample.com")]),
+        VIOLATION
+    );
+
+    // Permitted: one mailbox. The local part is case-sensitive.
+    let one = Constrained::new(constraints(&[(0x81, b"a@example.com")], &[]));
+    assert_eq!(one.verdict(&leaf, &[(0x81, b"a@Example.COM")]), None);
+    assert_eq!(one.verdict(&leaf, &[(0x81, b"A@example.com")]), VIOLATION);
+    assert_eq!(one.verdict(&leaf, &[(0x81, b"b@example.com")]), VIOLATION);
+
+    // Excluded.
+    let excluded = Constrained::new(constraints(&[], &[(0x81, b"example.com")]));
+    assert_eq!(excluded.verdict(&leaf, &[(0x81, b"a@other.org")]), None);
+    assert_eq!(
+        excluded.verdict(&leaf, &[(0x81, b"a@example.com")]),
+        VIOLATION
+    );
+    assert_eq!(
+        excluded.verdict(&name_with_emails("leaf", &[b"a@example.com"]), &[]),
+        VIOLATION
+    );
+    assert_eq!(
+        excluded.verdict(&leaf, &[(0x81, b"not-an-address")]),
+        UNSUPPORTED,
+        "it cannot be shown to be outside the excluded subtree"
+    );
+
+    // A constraint base there is no rule for refuses every path under it;
+    // so does a directory-name constraint, which is still not evaluated.
+    for nc in [
+        constraints(&[(0x81, b"@example.com")], &[]),
+        constraints(&[(0x81, b"a@")], &[]),
+        constraints(&[], &[(0x81, b"exa mple.com")]),
+        constraints(&[(0xa4, &name("Org"))], &[]),
+    ] {
+        let c = Constrained::new(nc);
+        assert_eq!(c.verdict(&leaf, &[(0x82, b"www.example.com")]), UNSUPPORTED);
+    }
+}
+
+/// REQ-X509-008: a wildcard dNSName is held to DNS constraints for every
+/// name it can match, not as a literal string. It is refused under an
+/// excluded subtree it could reach into, and under a permitted subtree it
+/// could reach out of.
+#[test]
+fn a_wildcard_is_constrained_for_every_name_it_matches() {
+    let leaf = name("leaf");
+    let excluded = Constrained::new(constraints(&[], &[(0x82, b"sub.example.test")]));
+    assert_eq!(
+        excluded.verdict(&leaf, &[(0x82, b"*.example.test")]),
+        VIOLATION,
+        "the wildcard matches the excluded sub.example.test"
+    );
+    assert_eq!(
+        excluded.verdict(&leaf, &[(0x82, b"*.sub.example.test")]),
+        VIOLATION
+    );
+    assert_eq!(excluded.verdict(&leaf, &[(0x82, b"*.other.test")]), None);
+    assert_eq!(
+        excluded.verdict(&leaf, &[(0x82, b"www.example.test")]),
+        None
+    );
+
+    let permitted = Constrained::new(constraints(&[(0x82, b"example.test")], &[]));
+    assert_eq!(permitted.verdict(&leaf, &[(0x82, b"*.example.test")]), None);
+    assert_eq!(
+        permitted.verdict(&leaf, &[(0x82, b"*.other.test")]),
+        VIOLATION
+    );
+    let narrow = Constrained::new(constraints(&[(0x82, b"sub.example.test")], &[]));
+    assert_eq!(
+        narrow.verdict(&leaf, &[(0x82, b"*.example.test")]),
+        VIOLATION,
+        "the wildcard matches names outside the permitted subtree"
+    );
+    assert_eq!(
+        narrow.verdict(&leaf, &[(0x82, b"*.sub.example.test")]),
+        None
+    );
+}
+
+/// REQ-X509-005, and the verification IronCrypto does for it: 22 certificate
+/// signatures made by PyCA `cryptography` (see `tests/vectors/README.md`).
+/// A curve signs with its own hash and no other, RSA-PSS only with MGF1 over
+/// the same hash and a salt as long as it, and the recorded verdicts hold,
+/// with one difference: IronPrivacyGuard did not verify P-521 and this crate
+/// does.
+#[test]
+fn pyca_certificate_signatures_are_judged_as_recorded() {
+    let vectors = ic_json::parse(include_str!("../tests/vectors/x509-signatures.json")).unwrap();
+    let cases = vectors.get("cases").unwrap().as_array().unwrap();
+    assert_eq!(cases.len(), 22);
+    let opts = opts();
+    let mut accepted = 0;
+    for case in cases {
+        let name = case.get("name").unwrap().as_str().unwrap();
+        let hex = |key: &str| -> Vec<u8> {
+            let s = case.get(key).unwrap().as_str().unwrap();
+            (0..s.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+                .collect()
+        };
+        let (certificate, issuer_spki) = (hex("certificate"), hex("issuer_spki"));
+        let recorded = case.get("accepted").unwrap().as_bool().unwrap();
+        let expected = recorded || name == "unsupported_p521";
+        let verdict = x509::Certificate::parse(&certificate)
+            .and_then(|c| x509::check_signature(&c, &issuer_spki, &opts));
+        assert_eq!(verdict.is_ok(), expected, "{name}: {:?}", verdict.err());
+        accepted += usize::from(expected);
+    }
+    assert_eq!(accepted, 16, "15 recorded as accepted, and P-521");
+}

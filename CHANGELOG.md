@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- rfc822Name constraints are evaluated (REQ-X509-085), where a path under
+  one used to be refused as unsupported. A host names every mailbox at that
+  host, a domain with a leading dot every mailbox at a host below it, and a
+  mailbox that mailbox alone, with the local part compared exactly
+  (RFC 5280 §4.2.1.10). The constraint governs rfc822Name alternative names
+  and emailAddress attributes of the subject alike. An address or a
+  constraint with no rule still refuses the path, and directory-name and
+  URI constraints are still not evaluated.
+
+### Verification
+- 93 more cases from an independent implementation: IronPrivacyGuard's
+  PyCA `cryptography` vectors for TLS server identity (41), path building
+  (30) and certificate signatures (22), copied unchanged with their
+  generators' provenance. IronPKI's verdict is the recorded one in 89. The
+  four where it differs are named in the tests with the rule: a dNSName
+  with a trailing dot names the same host; anyExtendedKeyUsage stands for
+  the TLS purposes; a wildcard under a DNS constraint is evaluated, and
+  `*.example.test` is within a permitted `example.test`; and P-521
+  signatures are verified.
+- A wildcard dNSName is tested against DNS constraints for the names it can
+  match: refused under an excluded subtree it reaches into and under a
+  permitted subtree it reaches out of.
+
 ## 0.1.0 (2026-10-10)
 
 The first version.

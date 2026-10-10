@@ -77,6 +77,8 @@ const OID_SHA512: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03
 const OID_ED25519: &[u8] = &[0x2b, 0x65, 0x70];
 
 const OID_CN: &[u8] = &[0x55, 0x04, 0x03];
+/// emailAddress, 1.2.840.113549.1.9.1: an address carried in a subject name.
+const OID_EMAIL_ADDRESS: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x09, 0x01];
 
 const OID_EXT_SKI: &[u8] = &[0x55, 0x1d, 0x0e];
 const OID_EXT_KU: &[u8] = &[0x55, 0x1d, 0x0f];
@@ -114,6 +116,7 @@ const T_CTX2: u8 = 0xa2;
 const T_CTX3: u8 = 0xa3;
 const T_ISSUER_UID: u8 = 0x81;
 const T_SUBJECT_UID: u8 = 0x82;
+const T_GN_EMAIL: u8 = 0x81;
 const T_GN_DNS: u8 = 0x82;
 const T_GN_IP: u8 = 0x87;
 
@@ -1896,7 +1899,7 @@ fn check_key_policy(key: &PublicKey<'_>, opts: &VerifyOptions<'_>) -> Result<()>
 }
 
 /// Verify `cert`'s signature with `issuer_spki`, returning the scheme.
-fn check_signature(
+pub(crate) fn check_signature(
     cert: &Certificate<'_>,
     issuer_spki: &[u8],
     opts: &VerifyOptions<'_>,
@@ -2130,8 +2133,75 @@ fn name_constraint_lists(nc: &[u8]) -> Result<NameConstraintLists<'_>> {
     })
 }
 
+/// An e-mail address split at its last `@`: a local part that is not empty
+/// and a host that is a DNS name. Anything else is not an address a
+/// constraint can be evaluated against.
+fn mailbox(address: &[u8]) -> Option<(&[u8], &str)> {
+    let at = address.iter().rposition(|b| *b == b'@')?;
+    let host = core::str::from_utf8(&address[at + 1..]).ok()?;
+    (at != 0 && address.is_ascii() && is_valid_dns_name(host, false))
+        .then_some((&address[..at], host))
+}
+
+/// Whether the e-mail address `name` is within the rfc822Name constraint
+/// `constraint` (RFC 5280 §4.2.1.10): a mailbox names that mailbox alone, a
+/// host names every mailbox at that host, and a domain with a leading dot
+/// names every mailbox at a host below it, not at the domain itself. The
+/// local part is compared exactly and the host without regard to case.
+/// `None` when either is not of a form there is a rule for, which the caller
+/// refuses. `REQ-X509-085`.
+fn email_within(name: &[u8], constraint: &[u8]) -> Option<bool> {
+    let (local, host) = mailbox(name)?;
+    if constraint.contains(&b'@') {
+        let (c_local, c_host) = mailbox(constraint)?;
+        return Some(local == c_local && host.eq_ignore_ascii_case(c_host));
+    }
+    let constraint = core::str::from_utf8(constraint).ok()?;
+    if let Some(domain) = constraint.strip_prefix('.') {
+        return is_valid_dns_name(domain, false).then(|| {
+            host.len() > constraint.len()
+                && host[host.len() - constraint.len()..].eq_ignore_ascii_case(constraint)
+        });
+    }
+    is_valid_dns_name(constraint, false).then(|| host.eq_ignore_ascii_case(constraint))
+}
+
+/// Whether an rfc822Name constraint base is one [`email_within`] has a rule for.
+fn email_constraint_is_evaluable(base: &[u8]) -> bool {
+    if base.contains(&b'@') {
+        return mailbox(base).is_some();
+    }
+    core::str::from_utf8(base)
+        .is_ok_and(|c| is_valid_dns_name(c.strip_prefix('.').unwrap_or(c), false))
+}
+
+/// Call `each` with every emailAddress value in a subject name. RFC 5280
+/// §4.2.1.10 puts those under rfc822Name constraints too: an address is no
+/// less constrained for sitting in the legacy place.
+fn subject_emails<'a>(
+    subject: &'a [u8],
+    mut each: impl FnMut(&'a [u8]) -> Result<()>,
+) -> Result<()> {
+    let mut outer = Der::new(subject);
+    let mut rdns = outer.nested(T_SEQUENCE)?;
+    while !rdns.is_empty() {
+        let mut set = rdns.nested(T_SET)?;
+        while !set.is_empty() {
+            let mut atv = set.nested(T_SEQUENCE)?;
+            let oid = atv.expect(T_OID)?;
+            let (_, value, _) = atv.tlv()?;
+            if oid == OID_EMAIL_ADDRESS {
+                each(value)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Apply one `NameConstraints` body to the names of `subjects`. `REQ-X509-008`.
 /// REQ-X509-044: IP constraint masks use CIDR encoding, even for absent name families.
+/// REQ-X509-085: rfc822Name constraints govern rfc822Name alternative names
+/// and emailAddress attributes of the subject alike.
 fn apply_name_constraints(nc: &[u8], subjects: &[&Certificate<'_>]) -> Result<()> {
     let violation = || Error::new(ErrorKind::CertificateUsage, "name constraints violated");
     let unsupported = || {
@@ -2150,19 +2220,18 @@ fn apply_name_constraints(nc: &[u8], subjects: &[&Certificate<'_>]) -> Result<()
         let mut subtrees = Der::new(body);
         while !subtrees.is_empty() {
             let mut st = subtrees.nested(T_SEQUENCE)?;
-            let (tag, _, _) = st.tlv()?;
-            if !st.is_empty() || !matches!(tag, T_GN_DNS | T_GN_IP) {
+            let (tag, base, _) = st.tlv()?;
+            if !st.is_empty()
+                || !matches!(tag, T_GN_EMAIL | T_GN_DNS | T_GN_IP)
+                || (tag == T_GN_EMAIL && !email_constraint_is_evaluable(base))
+            {
                 return Err(unsupported());
             }
         }
     }
-    for cert in subjects {
-        let mut names = Der::new(cert.ext.san.unwrap_or(&[]));
-        while !names.is_empty() {
-            let (tag, value, _) = names.tlv()?;
-            if !matches!(tag, T_GN_DNS | T_GN_IP) {
-                continue;
-            }
+    // One name of one form, against every subtree of that form.
+    let check = |tag: u8, value: &[u8]| -> Result<()> {
+        {
             let mut applicable = false;
             let mut covered = false;
             for (is_excluded, body) in [(false, permitted), (true, excluded)] {
@@ -2176,7 +2245,12 @@ fn apply_name_constraints(nc: &[u8], subjects: &[&Certificate<'_>]) -> Result<()
                     if ctag != tag {
                         continue;
                     }
-                    let mut within = if tag == T_GN_DNS {
+                    let mut within = if tag == T_GN_EMAIL {
+                        // An address there is no rule for is refused, not
+                        // passed over: it cannot be shown to be outside an
+                        // excluded subtree or inside a permitted one.
+                        email_within(value, base).ok_or_else(unsupported)?
+                    } else if tag == T_GN_DNS {
                         let name = core::str::from_utf8(value).map_err(|_| unsupported())?;
                         let constraint = core::str::from_utf8(base).map_err(|_| unsupported())?;
                         dns_within(dns_canonical(name), dns_canonical(constraint))
@@ -2209,6 +2283,17 @@ fn apply_name_constraints(nc: &[u8], subjects: &[&Certificate<'_>]) -> Result<()
                 return Err(violation());
             }
         }
+        Ok(())
+    };
+    for cert in subjects {
+        let mut names = Der::new(cert.ext.san.unwrap_or(&[]));
+        while !names.is_empty() {
+            let (tag, value, _) = names.tlv()?;
+            if matches!(tag, T_GN_EMAIL | T_GN_DNS | T_GN_IP) {
+                check(tag, value)?;
+            }
+        }
+        subject_emails(cert.subject, |address| check(T_GN_EMAIL, address))?;
     }
     Ok(())
 }
@@ -8526,6 +8611,42 @@ mod chain_tests {
         // The rule is about RSA: other keys pass.
         let p384 = SigningKey::generate(KeyKind::EcdsaP384, &mut rng()).unwrap();
         check_cnsa1_rsa_key(&sign::public_key(p384.spki()).unwrap()).unwrap();
+    }
+
+    /// REQ-X509-085: the rules for one address and one rfc822Name constraint.
+    #[test]
+    fn email_addresses_match_mailboxes_hosts_and_subdomains() {
+        for (name, constraint, want) in [
+            (&b"a@example.com"[..], &b"a@EXAMPLE.com"[..], Some(true)),
+            (b"A@example.com", b"a@example.com", Some(false)),
+            (b"b@example.com", b"a@example.com", Some(false)),
+            (b"a@example.com", b"example.com", Some(true)),
+            (b"a@Example.Com", b"example.com", Some(true)),
+            (b"a@mail.example.com", b"example.com", Some(false)),
+            (b"a@mail.example.com", b".example.com", Some(true)),
+            (b"a@MAIL.example.COM", b".example.com", Some(true)),
+            (b"a@example.com", b".example.com", Some(false)),
+            (b"a@notexample.com", b".example.com", Some(false)),
+            (b"a@b@example.com", b"example.com", Some(true)),
+            // No rule: not an address, or not a constraint.
+            (b"no-at-sign", b"example.com", None),
+            (b"@example.com", b"example.com", None),
+            (b"a@", b"example.com", None),
+            (b"a@exa mple.com", b"example.com", None),
+            (b"a@example.com", b"@example.com", None),
+            (b"a@example.com", b"exa mple.com", None),
+            (b"a@example.com", b".", None),
+            (b"a@example.com", b"", None),
+            (b"a@ex\xc3\xa4mple.com", b"example.com", None),
+        ] {
+            assert_eq!(
+                email_within(name, constraint),
+                want,
+                "{} under {}",
+                String::from_utf8_lossy(name),
+                String::from_utf8_lossy(constraint)
+            );
+        }
     }
 
     #[test]
