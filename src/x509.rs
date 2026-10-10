@@ -44,13 +44,13 @@ use ic_core::traits::RandomSource;
 
 use ic_core::sig::Signer;
 
-use crate::Purpose;
 use crate::error::{Error, ErrorKind, Result};
 #[cfg(test)]
 use crate::sign::SigningKey;
 use crate::sign::{
     self, OID_ML_DSA_44, OID_ML_DSA_65, OID_ML_DSA_87, PublicKey, SignatureScheme, push_tlv,
 };
+use crate::{Limits, Purpose, TrustAnchor};
 
 // ---------------------------------------------------------------------------
 // Object identifiers (content bytes)
@@ -121,13 +121,6 @@ const T_GN_IP: u8 = 0x87;
 const KU_DIGITAL_SIGNATURE: u16 = 1 << 0;
 const KU_KEY_CERT_SIGN: u16 = 1 << 5;
 const KU_CRL_SIGN: u16 = 1 << 6;
-
-/// Work bound on path search: signature verifications and candidate visits.
-// Every unit of the budget is spent on one signature verification, the
-// dominant cost: 24 is three times the deepest path allowed (max_depth 8),
-// and bounds what a peer's crafted chain can cost. At 100, a 5 KB chain of
-// same-key P-521 intermediates cost a server about 73 ms. `REQ-X509-076`.
-const SEARCH_BUDGET: usize = 24;
 
 fn bad(context: &'static str) -> Error {
     Error::new(ErrorKind::BadCertificate, context)
@@ -1588,6 +1581,20 @@ impl RootStore {
         Ok(())
     }
 
+    /// Add a trust anchor in either form: a certificate, as
+    /// [`add_der`](Self::add_der) takes, or a name and a key, as
+    /// [`add_anchor`](Self::add_anchor) does. `REQ-X509-082`.
+    pub fn add(&mut self, anchor: TrustAnchor<'_>) -> Result<()> {
+        match anchor {
+            TrustAnchor::Certificate(der) => self.add_der(der),
+            TrustAnchor::Key {
+                subject,
+                spki,
+                name_constraints,
+            } => self.add_anchor(subject, spki, name_constraints),
+        }
+    }
+
     /// Add a trust anchor given as a name and a key, for roots that are
     /// distributed that way and not as certificates. `REQ-X509-079`.
     ///
@@ -1749,8 +1756,13 @@ pub struct VerifyOptions<'s> {
     pub usage: Purpose,
     /// Signature schemes permitted on certificate links. `REQ-X509-005`.
     pub allowed_schemes: &'s [SignatureScheme],
-    /// Most certificates on a path, leaf included, anchor excluded.
-    pub max_depth: usize,
+    /// The work bounds no input may exceed. Every unit of
+    /// `max_signature_checks` is spent on one signature verification, the
+    /// dominant cost of a path search, so it bounds what a crafted chain
+    /// can cost: [`Limits::ONLINE`] allows 24, three for each level of the
+    /// deepest path; at 100, a 5 KB chain of same-key P-521 intermediates
+    /// cost a server about 73 ms. `REQ-X509-076`, `REQ-X509-081`.
+    pub limits: Limits,
     /// Smallest RSA modulus accepted anywhere on the path, in bits.
     pub min_rsa_bits: usize,
     /// CRLs to check every non-anchor certificate on the path against.
@@ -1758,19 +1770,35 @@ pub struct VerifyOptions<'s> {
     /// Fail unless every non-anchor certificate is shown good by a current
     /// CRL from its issuer. `REQ-CRL-003`.
     pub require_crl: bool,
+    /// Accept a leaf that is itself a trust anchor, by exact subject and
+    /// key, with no path: pinning. The leaf checks still run, and the report
+    /// has depth 0. [`new`](Self::new) allows it for the TLS purposes, where
+    /// trusting one server's own certificate is ordinary, and not for an
+    /// endorsement key, where a result has to mean that the key chains to a
+    /// root the caller chose. `REQ-X509-084`.
+    pub accept_anchor_as_leaf: bool,
 }
 
 impl<'s> VerifyOptions<'s> {
-    /// Options with the defaults: depth 8, RSA at least 2048 bits.
-    pub fn new(now: u64, usage: Purpose, allowed_schemes: &'s [SignatureScheme]) -> Self {
+    /// Options with RSA keys of at least 2048 bits and no CRLs. The bounds
+    /// are the caller's to choose: [`Limits::ONLINE`] for a chain a peer
+    /// sends in a handshake, [`Limits::DEFAULT`] for evidence examined
+    /// offline.
+    pub fn new(
+        now: u64,
+        usage: Purpose,
+        allowed_schemes: &'s [SignatureScheme],
+        limits: Limits,
+    ) -> Self {
         Self {
             now,
             usage,
             allowed_schemes,
-            max_depth: 8,
+            limits,
             min_rsa_bits: 2048,
             crls: None,
             require_crl: false,
+            accept_anchor_as_leaf: usage.leaf_signs(),
         }
     }
 }
@@ -1787,8 +1815,15 @@ pub struct ChainReport {
     pub schemes: Vec<SignatureScheme>,
     /// End of the leaf's validity, Unix seconds.
     pub leaf_not_after: u64,
-    /// Common name of the anchor, for display.
+    /// Common name of the anchor, for display. Names are not unique and an
+    /// anchor may have none: identify the anchor by the two fields below.
     pub anchor_subject_cn: Option<String>,
+    /// Subject name (DER) of the trust anchor the path ends at, exactly as
+    /// the caller supplied it. `REQ-X509-083`.
+    pub anchor_subject: Vec<u8>,
+    /// `SubjectPublicKeyInfo` (DER) of that anchor. With the subject it
+    /// identifies the anchor: a store holds at most one with both.
+    pub anchor_spki: Vec<u8>,
     /// Weakest classical strength of any key on the path, in bits.
     pub min_classical_bits: u16,
     /// Subject name (DER) of the certificate that issued the leaf.
@@ -2276,7 +2311,7 @@ impl<'c> Search<'c, '_, '_> {
             }
         }
 
-        if path.len() + 1 >= self.opts.max_depth {
+        if path.len() + 1 >= self.opts.limits.max_path_len {
             return Err(best.unwrap_or(Error::new(
                 ErrorKind::UnknownCa,
                 "no trust anchor within the depth limit",
@@ -2326,6 +2361,36 @@ impl<'c> Search<'c, '_, '_> {
     }
 }
 
+/// Refuse a request beyond the caller's bounds before any of it is parsed.
+/// `REQ-X509-081`.
+fn check_limits(
+    end_entity: &[u8],
+    intermediates: &[&[u8]],
+    roots: &RootStore,
+    limits: &Limits,
+) -> Result<()> {
+    if !limits.is_valid() {
+        return Err(Error::new(
+            ErrorKind::InvalidConfig,
+            "the limits are not usable",
+        ));
+    }
+    let over = |context| Error::new(ErrorKind::CapacityExceeded, context);
+    if roots.len() > limits.max_anchors {
+        return Err(over("more trust anchors than the limits allow"));
+    }
+    if intermediates.len() > limits.max_candidates {
+        return Err(over("more candidate certificates than the limits allow"));
+    }
+    if core::iter::once(&end_entity)
+        .chain(intermediates)
+        .any(|der| der.len() > limits.max_certificate_len)
+    {
+        return Err(over("a certificate is longer than the limits allow"));
+    }
+    Ok(())
+}
+
 /// What [`ChainReport::leaf_key`] says of a leaf key that was not read: an
 /// endorsement key of a kind this crate verifies no signature with.
 pub const UNEXAMINED_KEY: &str = "unexamined";
@@ -2359,6 +2424,7 @@ pub fn verify_chain(
     roots: &RootStore,
     opts: &VerifyOptions<'_>,
 ) -> Result<ChainReport> {
+    check_limits(end_entity, intermediates, roots, &opts.limits)?;
     let leaf = Certificate::parse(end_entity)?;
     if leaf.ext.unknown_critical {
         return Err(Error::new(
@@ -2392,19 +2458,25 @@ pub fn verify_chain(
         schemes: Vec::new(),
         leaf_not_after: leaf.not_after,
         anchor_subject_cn: None,
+        anchor_subject: Vec::new(),
+        anchor_spki: Vec::new(),
         min_classical_bits: leaf_key.map_or(u16::MAX, |k| k.classical_bits()),
         issuer_subject: leaf.issuer.to_vec(),
         issuer_spki: leaf.spki.to_vec(),
         crl_checked: false,
     };
 
-    // A leaf that is itself an anchor is pinned: accepted by exact key.
-    if let Some(a) = roots
-        .anchors
-        .iter()
-        .find(|a| a.subject == leaf.subject && a.spki == leaf.spki)
+    // A leaf that is itself an anchor is pinned: accepted by exact key,
+    // after the leaf checks above, when the caller allows it.
+    if opts.accept_anchor_as_leaf
+        && let Some(a) = roots
+            .anchors
+            .iter()
+            .find(|a| a.subject == leaf.subject && a.spki == leaf.spki)
     {
         report.anchor_subject_cn = name_common_name(&a.subject).map(String::from);
+        report.anchor_subject = a.subject.clone();
+        report.anchor_spki = a.spki.clone();
         if leaf_key.is_none() {
             // No key on this path was examined at all.
             report.min_classical_bits = 0;
@@ -2421,7 +2493,7 @@ pub fn verify_chain(
         opts,
     };
     let mut path = Vec::new();
-    let mut budget = SEARCH_BUDGET;
+    let mut budget = opts.limits.max_signature_checks;
     let anchor = search.extend(&leaf, &mut path, &mut report.schemes, &mut budget)?;
     let a = roots
         .anchors
@@ -2436,6 +2508,8 @@ pub fn verify_chain(
     report.min_classical_bits = report.min_classical_bits.min(ak.classical_bits());
     report.depth = path.len() + 1;
     report.anchor_subject_cn = name_common_name(&a.subject).map(String::from);
+    report.anchor_subject = a.subject.clone();
+    report.anchor_spki = a.spki.clone();
     match path.first() {
         Some(&i) => {
             report.issuer_subject = search.ints[i].subject.to_vec();
@@ -2496,6 +2570,11 @@ pub struct FixedChainReport<'a> {
     pub issuer_subject: &'a [u8],
     /// Public key of the leaf issuer.
     pub issuer_spki: &'a [u8],
+    /// Subject name (DER) of the trust anchor the path ends at.
+    /// `REQ-X509-083`.
+    pub anchor_subject: &'a [u8],
+    /// `SubjectPublicKeyInfo` (DER) of that anchor.
+    pub anchor_spki: &'a [u8],
 }
 
 /// Check the leaf's validity, usages, critical extensions and key policy.
@@ -2534,7 +2613,8 @@ pub fn verify_chain_fixed<'a>(
     roots: &'a RootStore,
     opts: &VerifyOptions<'_>,
 ) -> Result<FixedChainReport<'a>> {
-    if intermediates.len() > 7 || opts.max_depth > 8 {
+    check_limits(end_entity, intermediates, roots, &opts.limits)?;
+    if intermediates.len() > 7 || opts.limits.max_path_len > 8 {
         return Err(Error::new(
             ErrorKind::CapacityExceeded,
             "certificate path slots",
@@ -2555,12 +2635,21 @@ pub fn verify_chain_fixed<'a>(
         min_classical_bits: leaf_key(&leaf, opts)?.map_or(u16::MAX, |k| k.classical_bits()),
         issuer_subject: leaf.issuer,
         issuer_spki: leaf.spki,
+        anchor_subject: &[],
+        anchor_spki: &[],
     };
-    if roots
-        .anchors
-        .iter()
-        .any(|a| a.subject == leaf.subject && a.spki == leaf.spki)
+    if opts.accept_anchor_as_leaf
+        && let Some(a) = roots
+            .anchors
+            .iter()
+            .find(|a| a.subject == leaf.subject && a.spki == leaf.spki)
     {
+        report.anchor_subject = &a.subject;
+        report.anchor_spki = &a.spki;
+        if report.min_classical_bits == u16::MAX {
+            // No key on this path was examined at all.
+            report.min_classical_bits = 0;
+        }
         return Ok(report);
     }
     struct SearchFixed<'a, 'o> {
@@ -2630,7 +2719,7 @@ pub fn verify_chain_fixed<'a>(
                     Err(e) => note(&mut best, e),
                 }
             }
-            if depth + 1 >= self.opts.max_depth.min(8) {
+            if depth + 1 >= self.opts.limits.max_path_len.min(8) {
                 return Err(
                     best.unwrap_or(Error::new(ErrorKind::UnknownCa, "path depth exhausted"))
                 );
@@ -2675,9 +2764,11 @@ pub fn verify_chain_fixed<'a>(
     }
     let search = SearchFixed { ints, roots, opts };
     let mut path = [0usize; 8];
-    let mut budget = SEARCH_BUDGET;
+    let mut budget = opts.limits.max_signature_checks;
     let ai = search.extend(&leaf, &mut path, 0, &mut report.schemes, &mut budget)?;
     let anchor = &roots.anchors[ai];
+    report.anchor_subject = &anchor.subject;
+    report.anchor_spki = &anchor.spki;
     report.depth = report.schemes.iter().take_while(|s| s.is_some()).count();
     report.min_classical_bits = report
         .min_classical_bits
@@ -3109,7 +3200,7 @@ fn verify_both(
 ) -> Result<ChainReport> {
     let owned = verify_chain(leaf, ints, roots, opts);
     let fixed = verify_chain_fixed(leaf, ints, roots, opts);
-    if ints.len() > 7 || opts.max_depth > 8 {
+    if ints.len() > 7 || opts.limits.max_path_len > 8 {
         assert_eq!(
             fixed.err().map(|e| e.kind()),
             Some(ErrorKind::CapacityExceeded),
@@ -3123,6 +3214,8 @@ fn verify_both(
             let fs: Vec<SignatureScheme> = f.schemes.iter().flatten().copied().collect();
             assert_eq!(o.schemes, fs, "path schemes");
             assert_eq!(o.min_classical_bits, f.min_classical_bits, "path strength");
+            assert_eq!(o.anchor_subject, f.anchor_subject, "anchor name");
+            assert_eq!(o.anchor_spki, f.anchor_spki, "anchor key");
             assert_eq!(o.crl_checked, f.crl_checked, "CRL coverage");
         }
         (Err(a), Err(b)) => {
@@ -7037,7 +7130,7 @@ mod chain_tests {
     const ALL: &[SignatureScheme] = sign::VERIFY_SCHEMES;
 
     fn opts() -> VerifyOptions<'static> {
-        VerifyOptions::new(NOW, Purpose::TlsServer, ALL)
+        VerifyOptions::new(NOW, Purpose::TlsServer, ALL, Limits::ONLINE)
     }
 
     struct Pki {
@@ -7293,7 +7386,7 @@ mod chain_tests {
         );
         // The depth limit binds too.
         let mut shallow = opts();
-        shallow.max_depth = 2;
+        shallow.limits.max_path_len = 2;
         assert_eq!(
             err(verify_both(&leaf, &[&int2, &int1], &roots, &shallow)),
             ErrorKind::UnknownCa
@@ -7500,7 +7593,7 @@ mod chain_tests {
                     if valid {
                         assert_eq!(parsed.unwrap().ext.eku, Some(body.as_slice()));
                         for usage in [Purpose::TlsServer, Purpose::TlsClient] {
-                            let options = VerifyOptions::new(NOW, usage, ALL);
+                            let options = VerifyOptions::new(NOW, usage, ALL, Limits::ONLINE);
                             verify_both(&leaf, &[&p.int], &p.roots, &options).unwrap();
                         }
                     } else {
@@ -8438,7 +8531,12 @@ mod chain_tests {
     #[test]
     fn schemes_outside_the_policy_are_refused() {
         let p = pki([KeyKind::EcdsaP256; 3]);
-        let o = VerifyOptions::new(NOW, Purpose::TlsServer, &[SignatureScheme::Ed25519]);
+        let o = VerifyOptions::new(
+            NOW,
+            Purpose::TlsServer,
+            &[SignatureScheme::Ed25519],
+            Limits::ONLINE,
+        );
         assert_eq!(
             err(verify_both(&p.leaf, &[&p.int], &p.roots, &o)),
             ErrorKind::PolicyViolation
@@ -8448,7 +8546,7 @@ mod chain_tests {
     #[test]
     fn extended_key_usage_must_permit_the_use() {
         let p = pki([KeyKind::EcdsaP256; 3]);
-        let o = VerifyOptions::new(NOW, Purpose::TlsClient, ALL);
+        let o = VerifyOptions::new(NOW, Purpose::TlsClient, ALL, Limits::ONLINE);
         assert_eq!(
             err(verify_both(&p.leaf, &[&p.int], &p.roots, &o)),
             ErrorKind::CertificateUsage
@@ -8617,6 +8715,202 @@ mod chain_tests {
         out
     }
 
+    /// REQ-X509-081: a request beyond the caller's bounds is refused before
+    /// it is parsed, in both validators, and the signature-check bound is
+    /// the caller's: a chain that exhausts the online preset is searched to
+    /// the end under the offline one.
+    #[test]
+    fn the_callers_limits_bound_the_work() {
+        let p = pki([KeyKind::EcdsaP256; 3]);
+        let with = |limits| VerifyOptions::new(NOW, Purpose::TlsServer, ALL, limits);
+        verify_both(&p.leaf, &[&p.int], &p.roots, &with(Limits::ONLINE)).unwrap();
+
+        let unusable = Limits {
+            max_signature_checks: 7,
+            ..Limits::ONLINE
+        };
+        assert_eq!(
+            err(verify_both(&p.leaf, &[&p.int], &p.roots, &with(unusable))),
+            ErrorKind::InvalidConfig,
+            "fewer signature checks than the path is long"
+        );
+        let one_candidate = Limits {
+            max_candidates: 1,
+            ..Limits::ONLINE
+        };
+        verify_both(&p.leaf, &[&p.int], &p.roots, &with(one_candidate)).unwrap();
+        assert_eq!(
+            err(verify_both(
+                &p.leaf,
+                &[&p.int, &p.int],
+                &p.roots,
+                &with(one_candidate)
+            )),
+            ErrorKind::CapacityExceeded
+        );
+        // Exactly as long as the longer of the two is enough; one byte less
+        // refuses, whichever certificate is the long one.
+        let longest = p.leaf.len().max(p.int.len());
+        let fits = Limits {
+            max_certificate_len: longest,
+            ..Limits::ONLINE
+        };
+        verify_both(&p.leaf, &[&p.int], &p.roots, &with(fits)).unwrap();
+        for short in [p.leaf.len() - 1, p.int.len() - 1] {
+            let limits = Limits {
+                max_certificate_len: short,
+                ..Limits::ONLINE
+            };
+            assert_eq!(
+                err(verify_both(&p.leaf, &[&p.int], &p.roots, &with(limits))),
+                ErrorKind::CapacityExceeded
+            );
+        }
+        let mut two = p.roots.clone();
+        let other = SigningKey::generate(KeyKind::EcdsaP256, &mut rng()).unwrap();
+        two.add_der(&self_signed(&params("Other Root", &[], true), &other, &mut rng()).unwrap())
+            .unwrap();
+        let one_anchor = Limits {
+            max_anchors: 1,
+            ..Limits::ONLINE
+        };
+        verify_both(&p.leaf, &[&p.int], &p.roots, &with(one_anchor)).unwrap();
+        assert_eq!(
+            err(verify_both(&p.leaf, &[&p.int], &two, &with(one_anchor))),
+            ErrorKind::CapacityExceeded
+        );
+
+        // Three CAs that issue one another, and no anchor for them: fifteen
+        // signature checks see the whole graph. Eight run out first; the
+        // online preset's twenty-four reach the end and find no path.
+        let (_, hubs, leaf) = hub_graph(3);
+        let ints: Vec<&[u8]> = hubs.iter().map(|h| &h[..]).collect();
+        let eight = Limits {
+            max_signature_checks: 8,
+            ..Limits::ONLINE
+        };
+        let ran_out = verify_both(&leaf, &ints, &p.roots, &with(eight)).unwrap_err();
+        assert_eq!(ran_out.kind(), ErrorKind::UnknownCa);
+        assert_eq!(ran_out.context(), "path search budget exhausted");
+        let searched = verify_both(&leaf, &ints, &p.roots, &with(Limits::ONLINE)).unwrap_err();
+        assert_eq!(searched.kind(), ErrorKind::UnknownCa);
+        assert_ne!(searched.context(), "path search budget exhausted");
+        // The fixed-slot search spends the same budget.
+        let fixed = |limits| {
+            verify_chain_fixed(&leaf, &ints, &p.roots, &with(limits))
+                .err()
+                .map(|e| e.context())
+        };
+        assert_eq!(fixed(eight), Some("path search budget exhausted"));
+        assert_ne!(fixed(Limits::ONLINE), Some("path search budget exhausted"));
+    }
+
+    /// REQ-X509-082, REQ-X509-083: a store takes either form of trust
+    /// anchor, and a report names the anchor a path ended at by its subject
+    /// and key, which tell two anchors with one common name apart.
+    #[test]
+    fn a_report_identifies_its_anchor_exactly() {
+        let mut r = rng();
+        let a = pki([KeyKind::EcdsaP256; 3]);
+        // A second hierarchy whose root has the same name and another key.
+        let b_key = SigningKey::generate(KeyKind::EcdsaP384, &mut r).unwrap();
+        let b_root = self_signed(&params("Root", &[], true), &b_key, &mut r).unwrap();
+        let b_leaf_key = SigningKey::generate(KeyKind::EcdsaP256, &mut r).unwrap();
+        let b_leaf = issue(
+            &params("b", &["b.example.com"], false),
+            b_leaf_key.spki(),
+            &b_root,
+            &b_key,
+            &mut r,
+        )
+        .unwrap();
+        let a_root = Certificate::parse(&a.root).unwrap();
+        let b_parsed = Certificate::parse(&b_root).unwrap();
+        assert_eq!(a_root.subject_der(), b_parsed.subject_der());
+
+        let mut roots = RootStore::new();
+        roots.add(TrustAnchor::Certificate(&a.root)).unwrap();
+        roots
+            .add(TrustAnchor::Key {
+                subject: b_parsed.subject_der(),
+                spki: b_parsed.spki_der(),
+                name_constraints: None,
+            })
+            .unwrap();
+        assert_eq!(roots.len(), 2);
+
+        let via_a = verify_both(&a.leaf, &[&a.int], &roots, &opts()).unwrap();
+        let via_b = verify_both(&b_leaf, &[], &roots, &opts()).unwrap();
+        assert_eq!(via_a.anchor_subject_cn, via_b.anchor_subject_cn);
+        assert_eq!(via_a.anchor_subject, a_root.subject_der());
+        assert_eq!(via_a.anchor_spki, a_root.spki_der());
+        assert_eq!(via_b.anchor_subject, b_parsed.subject_der());
+        assert_eq!(via_b.anchor_spki, b_parsed.spki_der());
+        assert_ne!(via_a.anchor_spki, via_b.anchor_spki);
+
+        // `add` refuses what the two forms it stands for refuse.
+        let mut empty = RootStore::new();
+        assert!(empty.add(TrustAnchor::Certificate(&[0x30, 0x00])).is_err());
+        assert!(
+            empty
+                .add(TrustAnchor::Key {
+                    subject: &[0x30, 0x00],
+                    spki: b_parsed.spki_der(),
+                    name_constraints: None,
+                })
+                .is_err()
+        );
+        assert!(empty.is_empty());
+    }
+
+    /// REQ-X509-084: a leaf that is itself a trust anchor is accepted
+    /// without a path only when the caller allows it. The TLS purposes do
+    /// by default and say so with depth 0; an endorsement key does not, and
+    /// can be made to; the leaf checks run either way.
+    #[test]
+    fn a_pinned_leaf_is_accepted_only_when_allowed() {
+        let mut r = rng();
+        let key = SigningKey::generate(KeyKind::EcdsaP256, &mut r).unwrap();
+        let tls = self_signed(&params("solo", &["solo.example.com"], false), &key, &mut r).unwrap();
+        let mut roots = RootStore::new();
+        roots.add_der(&tls).unwrap();
+
+        let allowed = opts();
+        assert!(allowed.accept_anchor_as_leaf);
+        let report = verify_both(&tls, &[], &roots, &allowed).unwrap();
+        assert_eq!(report.depth, 0);
+        assert_eq!(
+            report.anchor_spki,
+            Certificate::parse(&tls).unwrap().spki_der()
+        );
+        let mut refused = opts();
+        refused.accept_anchor_as_leaf = false;
+        assert_eq!(
+            err(verify_both(&tls, &[], &roots, &refused)),
+            ErrorKind::UnknownCa
+        );
+
+        let mut ek_params = params("TPM", &[], false);
+        ek_params.usage = &[Purpose::TpmEndorsementKey];
+        let ek_cert = self_signed(&ek_params, &key, &mut r).unwrap();
+        let mut ek_roots = RootStore::new();
+        ek_roots.add_der(&ek_cert).unwrap();
+        let mut ek = VerifyOptions::new(NOW, Purpose::TpmEndorsementKey, ALL, Limits::DEFAULT);
+        assert!(!ek.accept_anchor_as_leaf);
+        assert_eq!(
+            err(verify_both(&ek_cert, &[], &ek_roots, &ek)),
+            ErrorKind::UnknownCa
+        );
+        ek.accept_anchor_as_leaf = true;
+        assert_eq!(verify_both(&ek_cert, &[], &ek_roots, &ek).unwrap().depth, 0);
+        // Pinned or not, the leaf is still checked: a year on, it is expired.
+        ek.now = NOW + 366 * DAY;
+        assert_eq!(
+            err(verify_both(&ek_cert, &[], &ek_roots, &ek)),
+            ErrorKind::CertificateExpired
+        );
+    }
+
     /// REQ-X509-080: a TPM endorsement-key certificate is validated as what
     /// it is. It must name the endorsement-key purpose in its extended key
     /// usage if it has one, and anyExtendedKeyUsage does not stand for it;
@@ -8629,7 +8923,7 @@ mod chain_tests {
     fn an_endorsement_key_leaf_is_held_to_its_own_rules() {
         let mut r = rng();
         let p = pki([KeyKind::EcdsaP256; 3]);
-        let ek = VerifyOptions::new(NOW, Purpose::TpmEndorsementKey, ALL);
+        let ek = VerifyOptions::new(NOW, Purpose::TpmEndorsementKey, ALL, Limits::ONLINE);
         let ek_key = SigningKey::generate(KeyKind::EcdsaP256, &mut r).unwrap();
         let mut ek_params = params("TPM", &[], false);
         ek_params.usage = &[Purpose::TpmEndorsementKey];
@@ -8775,7 +9069,7 @@ mod chain_tests {
     fn path_policy_limits_are_enforced() {
         let p = pki([KeyKind::EcdsaP256; 3]);
         let mut shallow = opts();
-        shallow.max_depth = 1;
+        shallow.limits.max_path_len = 1;
         assert!(
             msg(verify_both(&p.leaf, &[&p.int], &p.roots, &shallow))
                 .contains("no trust anchor within the depth limit")
@@ -9093,7 +9387,7 @@ mod chain_tests {
         )
         .unwrap();
         for usage in [Purpose::TlsServer, Purpose::TlsClient] {
-            let o = VerifyOptions::new(NOW, usage, ALL);
+            let o = VerifyOptions::new(NOW, usage, ALL, Limits::ONLINE);
             verify_both(&leaf, &[&p.int], &p.roots, &o).unwrap();
         }
     }
@@ -9321,7 +9615,7 @@ mod chain_tests {
     fn depth_limits_beyond_the_fixed_slots_are_refused() {
         let p = pki([KeyKind::EcdsaP256; 3]);
         let mut o = opts();
-        o.max_depth = 9;
+        o.limits.max_path_len = 9;
         assert_eq!(
             verify_chain_fixed(&p.leaf, &[&p.int], &p.roots, &o)
                 .err()
@@ -9332,7 +9626,7 @@ mod chain_tests {
             verify_both(&p.leaf, &[&p.int], &p.roots, &o).unwrap().depth,
             2
         );
-        o.max_depth = 8;
+        o.limits.max_path_len = 8;
         verify_chain_fixed(&p.leaf, &[&p.int], &p.roots, &o).unwrap();
     }
 

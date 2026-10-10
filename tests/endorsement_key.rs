@@ -4,7 +4,7 @@
 
 use ironpki::sign::VERIFY_ALGORITHMS;
 use ironpki::x509::{RootStore, VerifyOptions, verify_chain, verify_chain_fixed};
-use ironpki::{ErrorKind, Purpose};
+use ironpki::{ErrorKind, Limits, Purpose};
 
 /// 2027-01-15, inside the vectors' 2020 to 2050 validity.
 const NOW: u64 = 1_800_000_000;
@@ -24,8 +24,13 @@ fn pyca_endorsement_key_certificates_validate_as_their_path_deserves() {
     roots
         .add_der(&hex(vectors.get("anchor").unwrap().as_str().unwrap()))
         .unwrap();
-    let ek = VerifyOptions::new(NOW, Purpose::TpmEndorsementKey, VERIFY_ALGORITHMS);
-    let tls = VerifyOptions::new(NOW, Purpose::TlsServer, VERIFY_ALGORITHMS);
+    let ek = VerifyOptions::new(
+        NOW,
+        Purpose::TpmEndorsementKey,
+        VERIFY_ALGORITHMS,
+        Limits::DEFAULT,
+    );
+    let tls = VerifyOptions::new(NOW, Purpose::TlsServer, VERIFY_ALGORITHMS, Limits::DEFAULT);
 
     // What path validation alone makes of each case. The three whose keys
     // differ from the TPM's are sound paths: binding a certificate to a

@@ -6,9 +6,9 @@ issuer, built on IronCrypto.
 **Status: extraction in progress.** `ironpki::x509` is IronSocketLayer
 0.3.4's certificate code, moved here with its 217 tests: parsing, path
 validation, name matching, CRLs, OCSP responses and issuance. It validates
-for a `Purpose`, including a TPM endorsement key. It does not yet use
-`TrustAnchor` or `Limits`, and nothing depends on it. The crate is not
-published.
+for a `Purpose`, including a TPM endorsement key, within the caller's
+`Limits`, against the caller's `TrustAnchor`s. Nothing depends on it yet, and
+the crate is not published.
 
 It has not been independently reviewed, and neither it nor IronCrypto is
 FIPS 140-3 validated.
@@ -39,8 +39,9 @@ here implements a primitive.
 Done: IronSocketLayer's validator moved here and passing its tests.
 Done: validation for a `Purpose`, with the TPM endorsement-key leaf rules,
 checked against certificates made with PyCA `cryptography`.
-Next: `TrustAnchor` and `Limits` in the validator's interface; the requirement
-ids and their traceability matrix; evaluating rfc822Name constraints, which
+Done: `TrustAnchor` and `Limits` in the validator's interface; a report that
+names its anchor by subject and key; pinning a leaf as an explicit option.
+Next: the requirement ids and their traceability matrix; evaluating rfc822Name constraints, which
 fail a path closed today; then IronSocketLayer and IronPrivacyGuard depend on
 this crate in place of their own copies.
 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) lists what IronPrivacyGuard needs

@@ -13,11 +13,10 @@
 //! its own [`Error`]. It validates for a [`Purpose`]: a TLS server, a TLS
 //! client, or a TPM endorsement key.
 //!
-//! [`TrustAnchor`] and [`Limits`] are the rest of the contract the finished
-//! validator is to meet: what a caller supplies, and the work bounds no
-//! input may exceed. [`x509`] does not use those two yet; its anchors live
-//! in its `RootStore` and its bounds are constants. See
-//! `docs/REQUIREMENTS.md`.
+//! A caller supplies its trust anchors as [`TrustAnchor`]s and the work
+//! bounds no input may exceed as [`Limits`], and a report names the anchor
+//! a path ended at by its subject and key. See `docs/REQUIREMENTS.md` for
+//! what its two consumers need and what is still missing.
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;

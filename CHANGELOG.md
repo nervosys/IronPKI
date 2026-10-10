@@ -20,3 +20,14 @@
   with, such as one marked RSAES-OAEP, is not read, which the report says
   (`UNEXAMINED_KEY`). The TLS purposes behave as before. Checked against
   ten certificates made with PyCA `cryptography`, from IronPrivacyGuard.
+- `VerifyOptions::new` takes `Limits`, and the validator's bounds come from
+  it: path length, candidate certificates, trust anchors, signature checks
+  and certificate size. A request beyond them is refused before it is
+  parsed (REQ-X509-081). There is no default: `Limits::ONLINE` keeps the 24
+  signature checks IronSocketLayer used; `Limits::DEFAULT` allows 256.
+- `RootStore::add` takes a `TrustAnchor` in either form (REQ-X509-082).
+- A report names the anchor a path ended at by its subject and key,
+  `anchor_subject` and `anchor_spki`, in both validators (REQ-X509-083).
+- Accepting a leaf that is itself a trust anchor, without a path, is an
+  option, `VerifyOptions::accept_anchor_as_leaf`: on for the TLS purposes,
+  as before, and off for an endorsement key (REQ-X509-084).
