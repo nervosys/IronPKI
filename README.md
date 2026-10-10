@@ -31,8 +31,8 @@ become one implementation.
 
 The crate is `no_std` with `alloc` without its default `std` feature, forbids
 unsafe code, and depends only on IronCrypto (`ic-core`, `ic-sig`, `ic-pkix`,
-`ic-hash`, 0.2.20 or later). Signatures are verified by `ic-sig`; nothing
-here implements a primitive.
+`ic-hash`, 0.2.21 or later). Signatures are verified by `ic-sig`, and the tests
+sign with its `SoftwareSigner`; nothing here implements a primitive.
 
 ## Plan
 

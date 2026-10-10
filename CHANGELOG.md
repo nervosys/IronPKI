@@ -36,3 +36,6 @@
   row, a row has no tag, or a cited test does not exist. Four of
   IronSocketLayer's certificate hardening tests, which used only this code,
   moved here with it.
+- The tests sign with IronCrypto's `ic_sig::SoftwareSigner`; the signing code
+  they first brought from IronSocketLayer is gone. IronCrypto 0.2.21 is now
+  the minimum.

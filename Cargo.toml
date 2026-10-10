@@ -13,22 +13,21 @@ categories = ["cryptography", "no-std"]
 publish = false
 
 [dependencies]
-# IronCrypto supplies every primitive and every encoding of one. 0.2.20 is the
-# minimum: it is the first release with the Poly1305 fix (GHSA-xr22-8pqp-gwfh)
-# and the first whose ic-sig this crate was written against.
-ic-core = { version = ">=0.2.20, <0.3", default-features = false }
-ic-sig = { version = ">=0.2.20, <0.3", default-features = false }
-ic-pkix = { version = ">=0.2.20, <0.3", default-features = false }
-ic-hash = { version = ">=0.2.20, <0.3", default-features = false }
+# IronCrypto supplies every primitive and every encoding of one. 0.2.21 is the
+# minimum: its ic-sig has the software signer the tests issue chains with,
+# and it is past the Poly1305 fix of 0.2.20 (GHSA-xr22-8pqp-gwfh).
+ic-core = { version = ">=0.2.21, <0.3", default-features = false }
+ic-sig = { version = ">=0.2.21, <0.3", default-features = false }
+ic-pkix = { version = ">=0.2.21, <0.3", default-features = false }
+ic-hash = { version = ">=0.2.21, <0.3", default-features = false }
 
-# The tests issue the chains they validate, with software keys.
+# The tests issue the chains they validate. Signing is ic-sig's; ic-rsa is
+# here to generate RSA keys, and ic-drbg for randomness.
 [dev-dependencies]
-ic-drbg = { version = ">=0.2.20, <0.3", features = ["std"] }
-ic-ec = { version = ">=0.2.20, <0.3" }
-ic-rsa = { version = ">=0.2.20, <0.3" }
-ic-mldsa = { version = ">=0.2.20, <0.3" }
+ic-drbg = { version = ">=0.2.21, <0.3", features = ["std"] }
+ic-rsa = { version = ">=0.2.21, <0.3" }
 # For reading the JSON vector file.
-ic-json = { version = ">=0.2.20, <0.3" }
+ic-json = { version = ">=0.2.21, <0.3" }
 
 [features]
 default = ["std"]

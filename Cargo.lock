@@ -4,24 +4,24 @@ version = 4
 
 [[package]]
 name = "ic-cipher"
-version = "0.2.20"
+version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15417b6e42e329dc9b57012dc3a51aa7f77a8143799dbeeaac6e0bc40db25483"
+checksum = "5561a998e00601544996a1781335675bf1fff0e2bfae155318bb30349796bfff"
 dependencies = [
  "ic-core",
 ]
 
 [[package]]
 name = "ic-core"
-version = "0.2.20"
+version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d8511a155a67b766a08125c19086ec22b3056448d79de6a78c6403aa85ff3db"
+checksum = "5953031ab273e10be9cc1027c87ae0c4c33f794f02c6a0ade11ba5e3d0c278e7"
 
 [[package]]
 name = "ic-drbg"
-version = "0.2.20"
+version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "046d518b766ab70ee222f7ae1320c26ff81e488dbb31e6daa7844e35e7495503"
+checksum = "9896269a34f9a8f1191522d325f17f159dd506ad175d50efb07c0c03999a7d63"
 dependencies = [
  "ic-cipher",
  "ic-core",
@@ -31,9 +31,9 @@ dependencies = [
 
 [[package]]
 name = "ic-ec"
-version = "0.2.20"
+version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c665f88ff6e23b59909221a97a3ed988206568f2835fd167f73a24af4a527dec"
+checksum = "ed1fddfb49a3400994ccd0260f7f3dc1ef5ba28f578f7c6a91cca1c34088a1d9"
 dependencies = [
  "ic-core",
  "ic-hash",
@@ -42,24 +42,24 @@ dependencies = [
 
 [[package]]
 name = "ic-hash"
-version = "0.2.20"
+version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bce03bf8ac5a0600856f04e815c28e8e9ec42c891ae21f57d3ba4b8609d01572"
+checksum = "ed7a1c8eee77a41599733167d0c27d3e025e59771bd001fa410c6ac4e5bd99cb"
 dependencies = [
  "ic-core",
 ]
 
 [[package]]
 name = "ic-json"
-version = "0.2.20"
+version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b1887b03d5dab94a693f4c017721c4b7dc80623ff677e5751e4a074d25f908a"
+checksum = "26475bd1db1d2c4713e857ea6e7ab7713f0c2d5370b0b8ad027425e513665a2c"
 
 [[package]]
 name = "ic-lms"
-version = "0.2.20"
+version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09327a0892669ab9881cb54ff833466e3d0cc8e01cd013d87070bc1b0aed62cc"
+checksum = "b1bcb57bc3022998cd79341433b5d13ab6bb832077eabbc7b720dc426b1f841c"
 dependencies = [
  "ic-core",
  "ic-hash",
@@ -67,9 +67,9 @@ dependencies = [
 
 [[package]]
 name = "ic-mac"
-version = "0.2.20"
+version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d787f698c134c852c86d3bebd891d73b90dd09cbbc1a9a3a349b46d497f1aa3d"
+checksum = "b55c2936f9d8e8bb38989c318656fbbcc6b9fdcc800b1b832e8378cceb7be615"
 dependencies = [
  "ic-cipher",
  "ic-core",
@@ -78,9 +78,9 @@ dependencies = [
 
 [[package]]
 name = "ic-mldsa"
-version = "0.2.20"
+version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c60a3001ce67c7443894ff1af92d826f0d97a33536c8852394a5d0e00514dd6"
+checksum = "5eddf6d99c15971bbd60bcfce90ce7f624759495135461c587826b6ef1fe9d41"
 dependencies = [
  "ic-core",
  "ic-hash",
@@ -88,18 +88,18 @@ dependencies = [
 
 [[package]]
 name = "ic-pkix"
-version = "0.2.20"
+version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db471ade251ba34596739df9c6f385989c45571230ada40616d09b7d9d58fa73"
+checksum = "cbf0c9ebc7c22db9b83042264db27ee30d357b6a52e3290484f1b1bc78a06312"
 dependencies = [
  "ic-core",
 ]
 
 [[package]]
 name = "ic-rsa"
-version = "0.2.20"
+version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd0d5864a49a863030c8e30f462f2179e95d221283f5d6a7f6fa4b8beadf4769"
+checksum = "4618182e713f83ec40911e063ec20ae2a9166f0b33a107c8bd98502af3e8e6f3"
 dependencies = [
  "ic-core",
  "ic-hash",
@@ -107,9 +107,9 @@ dependencies = [
 
 [[package]]
 name = "ic-sig"
-version = "0.2.20"
+version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45bff3e93afd2a4ffbee0158f2913188f7d54b562bc93956606c4e22ba7a4d48"
+checksum = "862cd93cd453adba7752a61053e1af76897514524c84b9f36d0f4fe372acb291"
 dependencies = [
  "ic-core",
  "ic-ec",
@@ -122,9 +122,9 @@ dependencies = [
 
 [[package]]
 name = "ic-slhdsa"
-version = "0.2.20"
+version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "385ef5610ba2608a25ba54909830f935a756c8c0cc237c6825e2f6da15a3c868"
+checksum = "e4066f984ea2382e3eabc63a5dcbbb1df13d61bac2b2acb9c3a6e26bcc45676f"
 dependencies = [
  "ic-core",
  "ic-hash",
@@ -137,10 +137,8 @@ version = "0.0.0"
 dependencies = [
  "ic-core",
  "ic-drbg",
- "ic-ec",
  "ic-hash",
  "ic-json",
- "ic-mldsa",
  "ic-pkix",
  "ic-rsa",
  "ic-sig",
