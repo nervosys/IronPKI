@@ -999,3 +999,302 @@ fn cnsa_profiles_hold_every_presented_key_to_the_suite() {
     );
     assert_eq!(check2(&[&rsa(3072)]), no2);
 }
+
+const ANY_POLICY: &[u8] = &[0x55, 0x1d, 0x20, 0x00];
+const POLICY_1: &[u8] = &[0x2a, 0x03, 0x01];
+const POLICY_2: &[u8] = &[0x2a, 0x03, 0x02];
+const POLICY_3: &[u8] = &[0x2a, 0x03, 0x03];
+
+/// `certificatePolicies` naming `policies`.
+fn certificate_policies(policies: &[&[u8]]) -> Vec<u8> {
+    let list: Vec<u8> = policies
+        .iter()
+        .flat_map(|p| tlv(0x30, &tlv(0x06, p)))
+        .collect();
+    ext(&[0x55, 0x1d, 0x20], false, &tlv(0x30, &list))
+}
+
+/// `policyMappings` of issuer-domain and subject-domain pairs.
+fn policy_mappings(pairs: &[(&[u8], &[u8])]) -> Vec<u8> {
+    let list: Vec<u8> = pairs
+        .iter()
+        .flat_map(|(issuer, subject)| tlv(0x30, &[tlv(0x06, issuer), tlv(0x06, subject)].concat()))
+        .collect();
+    ext(&[0x55, 0x1d, 0x21], true, &tlv(0x30, &list))
+}
+
+/// `policyConstraints` with either count.
+fn policy_constraints(require_explicit: Option<u8>, inhibit_mapping: Option<u8>) -> Vec<u8> {
+    let mut body = Vec::new();
+    if let Some(n) = require_explicit {
+        body.extend(tlv(0x80, &[n]));
+    }
+    if let Some(n) = inhibit_mapping {
+        body.extend(tlv(0x81, &[n]));
+    }
+    ext(&[0x55, 0x1d, 0x24], true, &tlv(0x30, &body))
+}
+
+fn inhibit_any_policy(count: u8) -> Vec<u8> {
+    ext(&[0x55, 0x1d, 0x36], true, &tlv(0x02, &[count]))
+}
+
+/// Both validators' verdict on a path whose certificates carry `levels` of
+/// extra extensions: the first is the certificate the root issued, the last
+/// the leaf. The root carries `root_extra`.
+fn policy_path(root_extra: &[Vec<u8>], levels: &[&[Vec<u8>]]) -> Option<ErrorKind> {
+    let mut signer = key();
+    let mut exts = vec![basic_constraints(true), key_usage(true)];
+    exts.extend_from_slice(root_extra);
+    let root = cert(1, &name("L0"), &name("L0"), signer.spki(), &exts, &signer);
+    let mut roots = RootStore::new();
+    roots.add_der(&root).unwrap();
+    let mut certs = Vec::new();
+    for (i, extra) in levels.iter().enumerate() {
+        let ca = i + 1 < levels.len();
+        let subject_key = key();
+        let mut exts = vec![basic_constraints(ca), key_usage(ca)];
+        exts.extend_from_slice(extra);
+        certs.push(cert(
+            2 + i as u8,
+            &name(&format!("L{i}")),
+            &name(&format!("L{}", i + 1)),
+            subject_key.spki(),
+            &exts,
+            &signer,
+        ));
+        signer = subject_key;
+    }
+    let leaf = certs.pop().unwrap();
+    let ints: Vec<&[u8]> = certs.iter().map(Vec::as_slice).collect();
+    let (owned, fixed) = verdicts(&leaf, &ints, &roots);
+    assert_eq!(owned, fixed, "the two validators disagree");
+    owned
+}
+
+/// REQ-X509-088: both validators process certificate policies. A path is
+/// refused when a certificate on it requires an explicit policy and none is
+/// valid down to the leaf, with mappings, inhibited mapping and inhibited
+/// anyPolicy applied; the three extensions are no longer refused as
+/// unknown when critical; and the trust anchor's own are not processed.
+#[test]
+fn certificate_policies_are_processed_on_a_path() {
+    let p = |policies: &[&[u8]]| certificate_policies(policies);
+    let require = policy_constraints(Some(0), None);
+    // Nothing requires a policy: every arrangement passes, critical or not.
+    assert_eq!(
+        policy_path(&[], &[&[p(&[POLICY_1])], &[p(&[POLICY_2])]]),
+        None
+    );
+    assert_eq!(
+        policy_path(
+            &[],
+            &[
+                &[
+                    p(&[POLICY_1]),
+                    policy_mappings(&[(POLICY_1, POLICY_2)]),
+                    policy_constraints(None, Some(0)),
+                    inhibit_any_policy(0)
+                ],
+                &[]
+            ]
+        ),
+        None
+    );
+    // The CA requires an explicit policy of what it issues.
+    let ca = [p(&[POLICY_1]), require.clone()];
+    assert_eq!(policy_path(&[], &[&ca, &[p(&[POLICY_1])]]), None);
+    assert_eq!(policy_path(&[], &[&ca, &[p(&[POLICY_2])]]), VIOLATION);
+    assert_eq!(policy_path(&[], &[&ca, &[]]), VIOLATION);
+    assert_eq!(policy_path(&[], &[&ca, &[p(&[ANY_POLICY])]]), None);
+    assert_eq!(
+        policy_path(&[], &[&ca, &[p(&[POLICY_2, POLICY_1])]]),
+        None,
+        "one valid policy among several is enough"
+    );
+    // Deferred by two certificates, a two-certificate path is not held to it.
+    let later = [p(&[POLICY_1]), policy_constraints(Some(2), None)];
+    assert_eq!(policy_path(&[], &[&later, &[p(&[POLICY_2])]]), None);
+    assert_eq!(
+        policy_path(&[], &[&later, &[p(&[POLICY_2])], &[p(&[POLICY_2])]]),
+        VIOLATION
+    );
+    // A leaf that requires a policy of itself.
+    assert_eq!(
+        policy_path(&[], &[&[p(&[POLICY_1])], core::slice::from_ref(&require)]),
+        VIOLATION
+    );
+    assert_eq!(
+        policy_path(
+            &[],
+            &[&[p(&[POLICY_1])], &[p(&[POLICY_1]), require.clone()]]
+        ),
+        None
+    );
+
+    // Three certificates: the policy must hold at each.
+    let mid = |extra: &[Vec<u8>]| -> Vec<Vec<u8>> { extra.to_vec() };
+    assert_eq!(
+        policy_path(&[], &[&ca, &mid(&[p(&[POLICY_2])]), &[p(&[POLICY_1])]]),
+        VIOLATION
+    );
+    // Mapped below the middle certificate: 1 is 2 from there on.
+    let bridge = mid(&[p(&[POLICY_1]), policy_mappings(&[(POLICY_1, POLICY_2)])]);
+    assert_eq!(policy_path(&[], &[&ca, &bridge, &[p(&[POLICY_2])]]), None);
+    assert_eq!(
+        policy_path(&[], &[&ca, &bridge, &[p(&[POLICY_1])]]),
+        VIOLATION
+    );
+    assert_eq!(
+        policy_path(&[], &[&ca, &bridge, &[p(&[POLICY_3])]]),
+        VIOLATION
+    );
+    // Mapping inhibited from the top: the mapped policy is lost.
+    let no_mapping = [p(&[POLICY_1]), policy_constraints(Some(0), Some(0))];
+    assert_eq!(
+        policy_path(&[], &[&no_mapping, &bridge, &[p(&[POLICY_2])]]),
+        VIOLATION
+    );
+    assert_eq!(
+        policy_path(&[], &[&no_mapping, &bridge, &[p(&[POLICY_1])]]),
+        VIOLATION
+    );
+    // anyPolicy inhibited from the top.
+    let no_any = [p(&[POLICY_1]), require.clone(), inhibit_any_policy(0)];
+    assert_eq!(policy_path(&[], &[&no_any, &[p(&[ANY_POLICY])]]), VIOLATION);
+    assert_eq!(policy_path(&[], &[&no_any, &[p(&[POLICY_1])]]), None);
+    let any_later = [p(&[POLICY_1]), require.clone(), inhibit_any_policy(1)];
+    assert_eq!(
+        policy_path(
+            &[],
+            &[&any_later, &mid(&[p(&[ANY_POLICY])]), &[p(&[POLICY_1])]]
+        ),
+        None
+    );
+    assert_eq!(
+        policy_path(
+            &[],
+            &[&any_later, &mid(&[p(&[ANY_POLICY])]), &[p(&[ANY_POLICY])]]
+        ),
+        VIOLATION
+    );
+
+    // The trust anchor is trusted for what the caller says, not for what
+    // its certificate says of policies: its extensions are not processed.
+    assert_eq!(
+        policy_path(&[p(&[POLICY_1]), require], &[&[], &[p(&[POLICY_2])]]),
+        None
+    );
+}
+
+/// REQ-X509-089: the policy extensions are held to their encodings when a
+/// certificate is parsed, so that nothing malformed reaches processing.
+#[test]
+fn policy_extensions_are_held_to_their_encodings() {
+    let signer = key();
+    let parses = |extension: Vec<u8>| {
+        let der = cert(
+            9,
+            &name("Issuer"),
+            &name("Subject"),
+            signer.spki(),
+            &[basic_constraints(true), key_usage(true), extension],
+            &signer,
+        );
+        x509::Certificate::parse(&der)
+            .map(|_| ())
+            .map_err(|e| (e.kind(), e.context()))
+    };
+    let bad = |context| Err((ErrorKind::BadCertificate, context));
+    let cp = |value: &[u8]| ext(&[0x55, 0x1d, 0x20], false, value);
+    let information = |body: &[u8]| tlv(0x30, &tlv(0x30, body));
+    let oid = tlv(0x06, POLICY_1);
+    let qualifier = tlv(
+        0x30,
+        &[
+            tlv(0x06, &[0x2b, 6, 1, 5, 5, 7, 2, 1]),
+            tlv(0x16, b"https://cps.test/"),
+        ]
+        .concat(),
+    );
+    assert_eq!(parses(cp(&information(&oid))), Ok(()));
+    assert_eq!(
+        parses(cp(&information(
+            &[oid.clone(), tlv(0x30, &qualifier)].concat()
+        ))),
+        Ok(())
+    );
+    assert_eq!(
+        parses(cp(&tlv(0x30, &[]))),
+        bad("empty certificatePolicies")
+    );
+    assert_eq!(
+        parses(cp(&information(&[oid.clone(), tlv(0x30, &[])].concat()))),
+        bad("empty policy qualifiers")
+    );
+    assert_eq!(
+        parses(cp(&information(&tlv(0x06, &[0x2a, 0x80, 0x01])))),
+        bad("nonminimal OBJECT IDENTIFIER subidentifier")
+    );
+    assert!(parses(cp(&information(&[]))).is_err());
+    assert!(parses(cp(&information(&[oid.clone(), tlv(0x05, &[])].concat()))).is_err());
+    assert!(parses(cp(&[information(&oid), vec![0x05, 0x00]].concat())).is_err());
+    let many = |count: usize| {
+        let list: Vec<u8> = (0..count)
+            .flat_map(|i| {
+                tlv(
+                    0x30,
+                    &tlv(0x06, &[0x2a, 0x03, 0x81 + (i >> 7) as u8, (i & 0x7f) as u8]),
+                )
+            })
+            .collect();
+        cp(&tlv(0x30, &list))
+    };
+    assert_eq!(parses(many(256)), Ok(()));
+    assert_eq!(parses(many(257)), bad("too many certificate policies"));
+
+    assert_eq!(parses(policy_mappings(&[(POLICY_1, POLICY_2)])), Ok(()));
+    assert_eq!(parses(policy_mappings(&[])), bad("empty policyMappings"));
+    for pair in [(ANY_POLICY, POLICY_2), (POLICY_1, ANY_POLICY)] {
+        assert_eq!(
+            parses(policy_mappings(&[(POLICY_1, POLICY_2), pair])),
+            bad("anyPolicy in a policy mapping")
+        );
+    }
+    let pm = |value: &[u8]| ext(&[0x55, 0x1d, 0x21], true, value);
+    assert!(parses(pm(&information(&oid))).is_err(), "half a pair");
+    assert!(
+        parses(pm(&information(
+            &[oid.clone(), oid.clone(), oid.clone()].concat()
+        )))
+        .is_err(),
+        "three in a pair"
+    );
+
+    assert_eq!(parses(policy_constraints(Some(0), None)), Ok(()));
+    assert_eq!(parses(policy_constraints(None, Some(3))), Ok(()));
+    assert_eq!(parses(policy_constraints(Some(1), Some(2))), Ok(()));
+    assert_eq!(
+        parses(policy_constraints(None, None)),
+        bad("empty policyConstraints")
+    );
+    let pc = |body: &[u8]| ext(&[0x55, 0x1d, 0x24], true, &tlv(0x30, body));
+    assert!(
+        parses(pc(&[tlv(0x81, &[1]), tlv(0x80, &[1])].concat())).is_err(),
+        "out of order"
+    );
+    assert!(parses(pc(&tlv(0x80, &[0x80]))).is_err(), "negative");
+    assert!(
+        parses(pc(&tlv(0x80, &[0x00, 0x01]))).is_err(),
+        "not minimal"
+    );
+    assert!(parses(pc(&tlv(0x80, &[]))).is_err(), "empty");
+    assert!(parses(pc(&tlv(0x82, &[1]))).is_err(), "an unknown field");
+
+    assert_eq!(parses(inhibit_any_policy(0)), Ok(()));
+    let iap = |value: &[u8]| ext(&[0x55, 0x1d, 0x36], true, value);
+    assert!(parses(iap(&tlv(0x02, &[0xff]))).is_err(), "negative");
+    assert!(parses(iap(&tlv(0x02, &[]))).is_err(), "empty");
+    assert!(parses(iap(&[tlv(0x02, &[1]), tlv(0x02, &[1])].concat())).is_err());
+    assert!(parses(iap(&tlv(0x04, &[1]))).is_err(), "not an INTEGER");
+}

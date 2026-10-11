@@ -30,15 +30,19 @@ builds on. No CMVP certificate exists for either.
   paths and certificate signatures, with the five places this crate's
   verdict differs from the recorded one named and explained in the tests;
 - two fuzz targets with AddressSanitizer (`fuzz/`), one of which fails if the
-  two path validators disagree. The runs recorded there are short: three
+  two path validators disagree. The runs recorded there are short: five
   minutes each.
 
 - tests against OpenSSL 3.5 in both directions
   (`tests/openssl_interop.rs`): each verifies the chains the other issues,
   honours the other's CRLs and reads the other's OCSP responses; and 63
-  certificates under name constraints of every form evaluated here get the
-  same verdict from OpenSSL and from both validators. They cover what
+  certificates under name constraints of every form evaluated here, and
+  26 paths with certificate policies, mappings and policy constraints, get
+  the same verdict from OpenSSL and from both validators. They cover what
   OpenSSL will issue from its command line, which is well-formed.
+- certificate policy processing compared with RFC 5280's own procedure,
+  the policy tree written out as a test, on 300,000 paths drawn from a
+  fixed sequence.
 
 Most of the code and its tests came from IronSocketLayer 0.3.4, where it was
 also exercised against public servers through TLS handshakes. **That has not
@@ -51,8 +55,13 @@ None of that substitutes for review by someone else.
 So that nothing is assumed:
 
 - It fetches nothing: no issuer certificates, CRLs or OCSP responses.
-- Certificate policies are not processed. A critical `policyConstraints` or
-  `inhibitAnyPolicy` fails the path closed.
+- Certificate policies are processed for one set of inputs only, RFC
+  5280's defaults: any policy is acceptable and none is required at the
+  start. A path is refused when a certificate on it requires an explicit
+  policy and none is valid. A caller cannot name the policies it accepts,
+  require one itself, or learn which were valid; policy qualifiers are not
+  examined. A path whose policies take more than a fixed amount of work to
+  evaluate is refused.
 - Name constraints are evaluated for dNSName, iPAddress, rfc822Name,
   directoryName and uniformResourceIdentifier. Any other form in a
   constraint fails the path closed.

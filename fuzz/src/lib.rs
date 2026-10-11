@@ -189,8 +189,9 @@ pub fn sign_tbs(tbs: &[u8], key: &SoftwareSigner) -> Vec<u8> {
 
 /// A root, an intermediate with name constraints (permitted dNSName,
 /// rfc822Name and URI host fuzz.test, permitted iPAddress 10.0.0.0/8,
-/// excluded dNSName bad.fuzz.test and directoryName "Bad Subject"), and a
-/// leaf under it with a name of each form; the keys sign whatever TBS
+/// excluded dNSName bad.fuzz.test and directoryName "Bad Subject") and
+/// with every policy extension, and a leaf under it with a name of each
+/// form and a policy the intermediate's mapping makes valid; the keys sign whatever TBS
 /// the fuzzer makes of them.
 pub struct DiffPki {
     pub root_key: SoftwareSigner,
@@ -241,12 +242,39 @@ pub fn diff_pki() -> &'static DiffPki {
                 &[tlv(0xa0, &permitted), tlv(0xa1, &excluded)].concat(),
             ),
         );
+        // Policies: the intermediate holds 1.2.3.1 and 1.2.3.2, maps the
+        // first to 1.2.3.3, requires an explicit policy of what it issues,
+        // and inhibits further mapping and anyPolicy one certificate on.
+        let policy = |n: u8| tlv(0x06, &[0x2a, 0x03, n]);
+        let policies = |list: &[u8]| {
+            let body: Vec<u8> = list.iter().flat_map(|n| tlv(0x30, &policy(*n))).collect();
+            ext(&[0x55, 0x1d, 0x20], false, &tlv(0x30, &body))
+        };
+        let mappings = ext(
+            &[0x55, 0x1d, 0x21],
+            true,
+            &tlv(0x30, &tlv(0x30, &[policy(1), policy(3)].concat())),
+        );
+        let constraints = ext(
+            &[0x55, 0x1d, 0x24],
+            true,
+            &tlv(0x30, &[tlv(0x80, &[0]), tlv(0x81, &[1])].concat()),
+        );
+        let inhibit_any = ext(&[0x55, 0x1d, 0x36], true, &tlv(0x02, &[1]));
         let int_tbs = tbs(
             2,
             "Diff Root",
             "Diff Int",
             int_key.public_key(),
-            &[ca_bc, ca_ku, nc],
+            &[
+                ca_bc,
+                ca_ku,
+                nc,
+                policies(&[1, 2]),
+                mappings,
+                constraints,
+                inhibit_any,
+            ],
         );
         let san = ext(
             &[0x55, 0x1d, 0x11],
@@ -278,7 +306,7 @@ pub fn diff_pki() -> &'static DiffPki {
             "Diff Int",
             "a.fuzz.test",
             leaf_key.public_key(),
-            &[leaf_bc, leaf_ku, eku, san],
+            &[leaf_bc, leaf_ku, eku, san, policies(&[3])],
         );
         let ek_ku = ext(&[0x55, 0x1d, 0x0f], true, &tlv(0x03, &[0x05, 0x20]));
         let ek_eku = ext(
@@ -301,6 +329,7 @@ pub fn diff_pki() -> &'static DiffPki {
                 ek_ku,
                 ek_eku,
                 ek_san,
+                policies(&[2]),
             ],
         );
         let mut roots = RootStore::new();

@@ -47,17 +47,19 @@ A crash input becomes a regression test in `src/` alongside the fix.
 ## Results so far
 
 Windows 11, nightly, AddressSanitizer, on a loaded machine, 2026-10-10, at
-IronPKI 0.1.2, with URI and directory-name constraints and names of both
-forms in the differential fixtures. No crashes, no sanitizer reports and no
+IronPKI 0.1.2 plus certificate policy processing, with URI and
+directory-name constraints, names of both forms and every policy extension
+in the differential fixtures. No crashes, no sanitizer reports and no
 disagreement between the validators (leak detection is not available with
 ASan on Windows):
 
 | Target | Runs | Time |
 |---|---:|---:|
-| `pki` | 577,299 | 181 s |
-| `pki_differential` | 335,113 | 181 s |
+| `pki` | 546,024 | 301 s |
+| `pki_differential` | 641,750 | 301 s |
 
-These are short runs, and they were made after 0.1.2 was published, not
-before. The same two targets ran against this code from
+These are short runs. 0.1.2's own change to the validator was fuzzed only
+after it was published (three minutes a target, without a finding). The
+same two targets ran against this code from
 IronSocketLayer before it moved here (525,508 and 267,672 runs in 91 s each,
 for its 0.4.0), without a finding.

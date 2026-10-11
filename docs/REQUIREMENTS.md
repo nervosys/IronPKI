@@ -78,5 +78,9 @@ Known from its 0.3.3 behaviour:
 - Whether TPM key-attestation verification (IPG's `src/attest.rs`) belongs
   here or stays in IPG.
 - How certificate policies are handled. IPG does not process the policy tree.
+  Decided since: IronPKI processes them for RFC 5280's default inputs
+  (REQ-X509-088), so a path on which a CA requires an explicit policy and
+  none is valid is refused, where it used to be refused as unsupported
+  only if the requirement was marked critical.
 - Decided 2026-10-10: IronPKI offers a commercial licence alongside
   AGPL-3.0-or-later, with a CLA, as IronSocketLayer and IronCrypto do.

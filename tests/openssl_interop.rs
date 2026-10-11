@@ -1046,3 +1046,264 @@ fn name_constraints_are_judged_as_openssl_judges_them() {
     }
     assert_eq!(judged, 63);
 }
+
+/// Certificate policies, judged by OpenSSL and by both validators here on
+/// the same OpenSSL-issued paths: every verdict is the same, and is the one
+/// RFC 5280 section 6.1 gives. Each case is the extensions of the
+/// certificates below the root, the one it issued first and the leaf last.
+/// REQ-X509-088.
+///
+/// OpenSSL is told `-policy anyPolicy`, which is RFC 5280's default
+/// user-initial-policy-set and the one this crate uses. With
+/// `-policy_check` alone its acceptable set is empty, and it refuses every
+/// path on which an explicit policy is required.
+#[test]
+#[ignore = "needs openssl 3.5+ on PATH"]
+fn certificate_policies_are_judged_as_openssl_judges_them() {
+    const P1: &str = "certificatePolicies=1.2.3.1";
+    const P2: &str = "certificatePolicies=1.2.3.2";
+    const P3: &str = "certificatePolicies=1.2.3.3";
+    const ANY: &str = "certificatePolicies=anyPolicy";
+    const REQUIRE: &str = "policyConstraints=critical,requireExplicitPolicy:0";
+    const CA: &str =
+        "certificatePolicies=1.2.3.1\npolicyConstraints=critical,requireExplicitPolicy:0";
+    const BRIDGE: &str = "certificatePolicies=1.2.3.1\npolicyMappings=critical,1.2.3.1:1.2.3.2";
+    let cases: &[(&[&str], bool)] = &[
+        // Nothing requires a policy.
+        (&[P1, P2], true),
+        (&[BRIDGE, ""], true),
+        // A CA that requires one of what it issues.
+        (&[CA, P1], true),
+        (&[CA, P2], false),
+        (&[CA, ""], false),
+        (&[CA, ANY], true),
+        (&[CA, "certificatePolicies=1.2.3.2,1.2.3.1"], true),
+        // Deferred by two certificates.
+        (
+            &[
+                "certificatePolicies=1.2.3.1\npolicyConstraints=critical,requireExplicitPolicy:2",
+                P2,
+            ],
+            true,
+        ),
+        (
+            &[
+                "certificatePolicies=1.2.3.1\npolicyConstraints=critical,requireExplicitPolicy:2",
+                P2,
+                P2,
+            ],
+            false,
+        ),
+        // A leaf that requires a policy of itself.
+        (&[P1, REQUIRE], false),
+        (
+            &[
+                P1,
+                "certificatePolicies=1.2.3.1\npolicyConstraints=critical,requireExplicitPolicy:0",
+            ],
+            true,
+        ),
+        // The policy holds at every level, or not at all.
+        (&[CA, P2, P1], false),
+        (&[CA, P1, P1], true),
+        // Mapped below the middle certificate.
+        (&[CA, BRIDGE, P2], true),
+        (&[CA, BRIDGE, P1], false),
+        (&[CA, BRIDGE, P3], false),
+        (
+            &[
+                CA,
+                "certificatePolicies=1.2.3.1\npolicyMappings=critical,1.2.3.1:1.2.3.2,1.2.3.1:1.2.3.3",
+                P3,
+            ],
+            true,
+        ),
+        (
+            &[
+                CA,
+                "certificatePolicies=1.2.3.1\npolicyMappings=critical,1.2.3.3:1.2.3.2",
+                P2,
+            ],
+            false,
+        ),
+        // Mapping inhibited from the top.
+        (
+            &[
+                "certificatePolicies=1.2.3.1\npolicyConstraints=critical,requireExplicitPolicy:0,inhibitPolicyMapping:0",
+                BRIDGE,
+                P2,
+            ],
+            false,
+        ),
+        (
+            &[
+                "certificatePolicies=1.2.3.1\npolicyConstraints=critical,requireExplicitPolicy:0,inhibitPolicyMapping:1",
+                BRIDGE,
+                P2,
+            ],
+            true,
+        ),
+        // anyPolicy inhibited.
+        (
+            &[
+                "certificatePolicies=1.2.3.1\npolicyConstraints=critical,requireExplicitPolicy:0\ninhibitAnyPolicy=critical,0",
+                ANY,
+            ],
+            false,
+        ),
+        (
+            &[
+                "certificatePolicies=1.2.3.1\npolicyConstraints=critical,requireExplicitPolicy:0\ninhibitAnyPolicy=critical,0",
+                P1,
+            ],
+            true,
+        ),
+        (
+            &[
+                "certificatePolicies=1.2.3.1\npolicyConstraints=critical,requireExplicitPolicy:0\ninhibitAnyPolicy=critical,1",
+                ANY,
+                P1,
+            ],
+            true,
+        ),
+        (
+            &[
+                "certificatePolicies=1.2.3.1\npolicyConstraints=critical,requireExplicitPolicy:0\ninhibitAnyPolicy=critical,1",
+                ANY,
+                ANY,
+            ],
+            false,
+        ),
+        // anyPolicy at the top, and a policy mapped under it.
+        (
+            &[
+                "certificatePolicies=anyPolicy\npolicyConstraints=critical,requireExplicitPolicy:0",
+                "certificatePolicies=anyPolicy\npolicyMappings=critical,1.2.3.3:1.2.3.2",
+                P2,
+            ],
+            true,
+        ),
+        (
+            &[
+                "certificatePolicies=anyPolicy\npolicyConstraints=critical,requireExplicitPolicy:0",
+                "certificatePolicies=anyPolicy\npolicyMappings=critical,1.2.3.3:1.2.3.2",
+                P1,
+            ],
+            true,
+        ),
+    ];
+    let ec = ["-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256"];
+    let base = ["req", "-x509", "-nodes", "-days", "2", "-config", "p.cnf"];
+    for (n, (levels, expected)) in cases.iter().enumerate() {
+        let dir = workdir(&format!("policy-{n}"));
+        let what = format!("case {n}: {levels:?}");
+        let mut config = String::from(
+            "[req]\ndistinguished_name=dn\n[dn]\n\
+             [l0]\nbasicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign\n",
+        );
+        for (i, extensions) in levels.iter().enumerate() {
+            let role = if i + 1 < levels.len() {
+                "basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign"
+            } else {
+                "basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature"
+            };
+            config.push_str(&format!("[l{}]\n{role}\n{extensions}\n", i + 1));
+        }
+        std::fs::write(dir.join("p.cnf"), config).unwrap();
+        must(
+            &[
+                &base[..],
+                &ec,
+                &[
+                    "-extensions",
+                    "l0",
+                    "-subj",
+                    "/CN=Level 0",
+                    "-keyout",
+                    "k0.pem",
+                    "-out",
+                    "c0.pem",
+                ],
+            ]
+            .concat(),
+            &dir,
+        );
+        let mut untrusted = String::new();
+        for i in 1..=levels.len() {
+            let (section, subject) = (format!("l{i}"), format!("/CN=Level {i}"));
+            let (issuer, issuer_key) = (format!("c{}.pem", i - 1), format!("k{}.pem", i - 1));
+            let (out, key) = (format!("c{i}.pem"), format!("k{i}.pem"));
+            must(
+                &[
+                    &base[..],
+                    &ec,
+                    &[
+                        "-extensions",
+                        &section,
+                        "-subj",
+                        &subject,
+                        "-CA",
+                        &issuer,
+                        "-CAkey",
+                        &issuer_key,
+                        "-keyout",
+                        &key,
+                        "-out",
+                        &out,
+                    ],
+                ]
+                .concat(),
+                &dir,
+            );
+            if i < levels.len() {
+                untrusted.push_str(&std::fs::read_to_string(dir.join(&out)).unwrap());
+            }
+        }
+        std::fs::write(dir.join("untrusted.pem"), &untrusted).unwrap();
+        let leaf_file = format!("c{}.pem", levels.len());
+        let (theirs, text) = openssl(
+            &[
+                "verify",
+                "-x509_strict",
+                "-policy",
+                "anyPolicy",
+                "-CAfile",
+                "c0.pem",
+                "-untrusted",
+                "untrusted.pem",
+                &leaf_file,
+            ],
+            &dir,
+        );
+        let mut roots = RootStore::new();
+        roots.add_der(&read_cert(&dir, "c0.pem")).unwrap();
+        let ints: Vec<Vec<u8>> = (1..levels.len())
+            .map(|i| read_cert(&dir, &format!("c{i}.pem")))
+            .collect();
+        let ints: Vec<&[u8]> = ints.iter().map(Vec::as_slice).collect();
+        let leaf = read_cert(&dir, &leaf_file);
+        let opts = VerifyOptions::new(
+            now(),
+            Purpose::TlsServer,
+            VERIFY_ALGORITHMS,
+            Limits::DEFAULT,
+        );
+        let owned = verify_chain(&leaf, &ints, &roots, &opts);
+        let fixed = verify_chain_fixed(&leaf, &ints, &roots, &opts);
+        assert_eq!(
+            owned.as_ref().err().map(|e| e.kind()),
+            fixed.as_ref().err().map(|e| e.kind()),
+            "{what}: the two validators disagree"
+        );
+        assert_eq!(theirs, *expected, "{what}: OpenSSL says {text}");
+        assert_eq!(owned.is_ok(), *expected, "{what}: {:?}", owned.err());
+        if !expected {
+            assert!(text.contains("no explicit policy"), "{what}: {text}");
+            assert_eq!(
+                owned.unwrap_err().kind(),
+                ErrorKind::CertificateUsage,
+                "{what}"
+            );
+        }
+    }
+}

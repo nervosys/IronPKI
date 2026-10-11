@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.3 (not released)
 
 ### Added
 - `x509::check_cnsa1_keys` and `x509::check_cnsa2_keys` (REQ-CFG-009): the
@@ -11,6 +11,28 @@
   remains, for the RSA rule alone.
 
 ### Changed
+- Certificate policies are processed (REQ-X509-088), as RFC 5280 section
+  6.1 has it for a caller that accepts any policy and requires none at the
+  start. A path is refused with `certificate-usage` when a certificate on
+  it requires an explicit policy (`policyConstraints`) and, where that
+  takes effect, no policy is valid down to the leaf; `policyMappings`,
+  inhibited mapping, `inhibitAnyPolicy` and the exemption of self-issued
+  certificates are applied. Two things change for existing callers:
+  - a critical `policyConstraints`, `policyMappings` or `inhibitAnyPolicy`
+    no longer refuses the path as an unknown critical extension;
+  - a path that requires an explicit policy and has none valid is refused,
+    where it was accepted if the requirement was not marked critical.
+  The trust anchor's own policy extensions are not processed. A caller
+  cannot yet name the policies it accepts or require one itself. The work
+  is bounded: a path whose policies need more than 8,192 evaluations is
+  refused, as is one of more than 64 certificates.
+- The four policy extensions are held to their encodings when a
+  certificate is parsed (REQ-X509-089): `certificatePolicies` and
+  `policyMappings` are nonempty lists of at most 256 entries, a mapping
+  names anyPolicy on neither side, `policyConstraints` holds at least one
+  count, and counts are minimal nonnegative integers. `certificatePolicies`
+  was not examined before, so a certificate with a malformed one, which
+  used to parse, no longer does.
 - An OCSP response built here identifies the certificate with SHA-384
   hashes, where it used SHA-256 (REQ-OCSP-035). The CNSA certificate
   profiles allow no shorter hash outside a signature. Verification is
@@ -19,10 +41,11 @@
   one hash only must now be asked for SHA-384 (`openssl ocsp -sha384`).
 
 ### Verification
-- The differential fuzz fixtures carry URI and directory-name constraints
-  and names of both forms. Both targets ran three minutes each against
-  0.1.2 without a finding. That was after 0.1.2 was published; the
-  validator change in it had not been fuzzed before release.
+- The differential fuzz fixtures carry URI and directory-name constraints,
+  names of both forms and every policy extension. Both targets ran five
+  minutes each with policy processing in place, without a finding. 0.1.2's
+  own validator change had not been fuzzed before it was published; it was
+  afterwards, three minutes a target, without a finding.
 
 ## 0.1.2 (2026-10-10)
 
@@ -63,6 +86,14 @@ compared with OpenSSL 3.5. No API change.
   with RSA PKCS#1 v1.5 and with RSA-PSS, and refuse each under another root
   and for another name. Each honours the other's CRL, revoked and not, and
   reads the other's OCSP responses, good and revoked.
+- Certificate policies judged beside OpenSSL: 26 OpenSSL-issued paths with
+  policies, mappings, requireExplicitPolicy, inhibitPolicyMapping and
+  inhibitAnyPolicy get the same verdict from OpenSSL (told
+  `-policy anyPolicy`, RFC 5280's default) and from both validators here.
+- Policy processing here does not build RFC 5280's policy tree, because
+  one of the two validators does not allocate. A test writes the tree out
+  as the RFC does and compares verdicts on 300,000 paths of one to five
+  certificates drawn from a fixed sequence; they agree on every one.
 - Name constraints judged beside OpenSSL: 63 OpenSSL-issued leaves under
   permitted and excluded DNS, address, e-mail, URI and directory-name
   subtrees get the same verdict from OpenSSL and from both validators

@@ -17,19 +17,20 @@
 //! - `extendedKeyUsage` on the leaf and on intermediates, when present;
 //! - that no certificate on the path carries a critical extension this module
 //!   does not understand;
-//! - `nameConstraints` for `dNSName` and `iPAddress` subtrees, from
-//!   intermediates and from anchors. Any other name form in a constraint
-//!   (directory names, e-mail, URIs) fails the path closed, because a constraint
-//!   that is not evaluated would be a constraint silently ignored;
+//! - `nameConstraints` for `dNSName`, `iPAddress`, `rfc822Name`,
+//!   `directoryName` and URI subtrees, from intermediates and from anchors.
+//!   Any other name form in a constraint fails the path closed, because a
+//!   constraint that is not evaluated would be a constraint silently ignored;
+//! - certificate policies, for a caller that names none (see below);
 //! - RSA moduli against a minimum size.
 //!
 //! # What is not
 //!
-//! Revocation (CRL, OCSP, CRLite) is out of scope. Certificate policies are not
-//! processed: `certificatePolicies` is recognised so a critical instance does
-//! not fail the path, which is correct because no explicit policy is ever
-//! required; `policyConstraints` and `inhibitAnyPolicy` are unknown, so a
-//! critical instance fails closed. Subject common names are never used for name
+//! Certificate policies are processed for RFC 5280's default inputs only
+//! (`REQ-X509-088`): any policy is acceptable and none is required at the
+//! start, so a path fails on policy grounds when a certificate on it
+//! requires an explicit policy and none is valid. A caller cannot name the
+//! policies it accepts. Subject common names are never used for name
 //! matching; [`Certificate::common_name`] exists for reports only.
 //!
 //! Requirement trace: `REQ-X509-001` (no panic on any input), `REQ-X509-002`
@@ -60,6 +61,8 @@ use crate::{Limits, Purpose, TrustAnchor};
 pub mod crl;
 #[path = "x509_ocsp.rs"]
 pub mod ocsp;
+#[path = "x509_policy.rs"]
+mod policy;
 
 const OID_ECDSA_SHA1: &[u8] = &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x01];
 const OID_ECDSA_SHA256: &[u8] = &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x02];
@@ -86,6 +89,9 @@ const OID_EXT_SAN: &[u8] = &[0x55, 0x1d, 0x11];
 const OID_EXT_BC: &[u8] = &[0x55, 0x1d, 0x13];
 const OID_EXT_NC: &[u8] = &[0x55, 0x1d, 0x1e];
 const OID_EXT_CP: &[u8] = &[0x55, 0x1d, 0x20];
+const OID_EXT_POLICY_MAPPINGS: &[u8] = &[0x55, 0x1d, 0x21];
+const OID_EXT_POLICY_CONSTRAINTS: &[u8] = &[0x55, 0x1d, 0x24];
+const OID_EXT_INHIBIT_ANY_POLICY: &[u8] = &[0x55, 0x1d, 0x36];
 const OID_EXT_AKI: &[u8] = &[0x55, 0x1d, 0x23];
 const OID_EXT_EKU: &[u8] = &[0x55, 0x1d, 0x25];
 
@@ -780,6 +786,7 @@ struct Extensions<'a> {
     name_constraints: Option<&'a [u8]>,
     ski: Option<&'a [u8]>,
     aki: Option<&'a [u8]>,
+    policy: policy::Policies<'a>,
     unknown_critical: bool,
 }
 
@@ -936,6 +943,14 @@ impl<'a> Certificate<'a> {
     /// The certificate's DER.
     pub fn der(&self) -> &'a [u8] {
         self.der
+    }
+
+    /// The certificate as policy processing sees it.
+    fn policy_cert(&self) -> policy::PolicyCert<'a> {
+        policy::PolicyCert {
+            policies: self.ext.policy,
+            self_issued: self.issuer == self.subject,
+        }
     }
 
     /// The subject public key.
@@ -1316,7 +1331,19 @@ fn parse_extensions(body: &[u8]) -> Result<Extensions<'_>> {
             OID_EXT_AKI => {
                 ext.aki = parse_authority_key_identifier(value)?;
             }
-            OID_EXT_CP => {}
+            OID_EXT_CP => {
+                ext.policy.policies = Some(policy::parse_certificate_policies(value)?);
+            }
+            OID_EXT_POLICY_MAPPINGS => {
+                ext.policy.mappings = Some(policy::parse_policy_mappings(value)?);
+            }
+            OID_EXT_POLICY_CONSTRAINTS => {
+                (ext.policy.require_explicit, ext.policy.inhibit_mapping) =
+                    policy::parse_policy_constraints(value)?;
+            }
+            OID_EXT_INHIBIT_ANY_POLICY => {
+                ext.policy.inhibit_any = Some(policy::parse_inhibit_any_policy(value)?);
+            }
             _ => {
                 if critical {
                     ext.unknown_critical = true;
@@ -2595,7 +2622,9 @@ impl<'c> Search<'c, '_, '_> {
         if let Some(nc) = &anchor.name_constraints {
             apply_name_constraints(nc, &chain)?;
         }
-        Ok(())
+        // REQ-X509-088: from the certificate the anchor issued to the leaf.
+        let policies: Vec<_> = chain.iter().rev().map(|c| c.policy_cert()).collect();
+        policy::check(&policies)
     }
 
     /// Extend `path` (indices into `ints`, leaf-side first) to an anchor.
@@ -3043,6 +3072,14 @@ pub fn verify_chain_fixed<'a>(
                             )?;
                         }
                     }
+                    // REQ-X509-088: from the certificate the anchor issued
+                    // to the leaf, in slots as the path itself is.
+                    let mut policies = [policy::PolicyCert::default(); 8];
+                    for (slot, &i) in policies.iter_mut().zip(path[..depth].iter().rev()) {
+                        *slot = self.ints[i].as_ref().ok_or(bad("path slot"))?.policy_cert();
+                    }
+                    *policies.get_mut(depth).ok_or(bad("path slot"))? = leaf.policy_cert();
+                    policy::check(&policies[..=depth])?;
                     Ok(ai)
                 })();
                 match result {
