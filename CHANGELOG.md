@@ -1,6 +1,10 @@
 # Changelog
 
-## 0.1.3 (not released)
+## 0.1.3 (2026-10-11)
+
+Certificate policies are processed, the CNSA profiles' key rule covers
+every certificate presented, and OCSP responses built here use SHA-384
+certificate identifiers. Two functions are added; nothing is removed.
 
 ### Added
 - `x509::check_cnsa1_keys` and `x509::check_cnsa2_keys` (REQ-CFG-009): the
