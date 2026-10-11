@@ -187,9 +187,10 @@ pub fn sign_tbs(tbs: &[u8], key: &SoftwareSigner) -> Vec<u8> {
     )
 }
 
-/// A root, an intermediate with name constraints (permitted dNSName
-/// fuzz.test and rfc822Name fuzz.test, excluded bad.fuzz.test, permitted
-/// iPAddress 10.0.0.0/8), and a leaf under it; the keys sign whatever TBS
+/// A root, an intermediate with name constraints (permitted dNSName,
+/// rfc822Name and URI host fuzz.test, permitted iPAddress 10.0.0.0/8,
+/// excluded dNSName bad.fuzz.test and directoryName "Bad Subject"), and a
+/// leaf under it with a name of each form; the keys sign whatever TBS
 /// the fuzzer makes of them.
 pub struct DiffPki {
     pub root_key: SoftwareSigner,
@@ -223,10 +224,15 @@ pub fn diff_pki() -> &'static DiffPki {
         let permitted = [
             subtree(0x82, b"fuzz.test"),
             subtree(0x81, b"fuzz.test"),
+            subtree(0x86, b"fuzz.test"),
             subtree(0x87, &[10, 0, 0, 0, 255, 0, 0, 0]),
         ]
         .concat();
-        let excluded = subtree(0x82, b"bad.fuzz.test");
+        let excluded = [
+            subtree(0x82, b"bad.fuzz.test"),
+            subtree(0xa4, &dn("Bad Subject")),
+        ]
+        .concat();
         let nc = ext(
             &[0x55, 0x1d, 0x1e],
             true,
@@ -250,6 +256,8 @@ pub fn diff_pki() -> &'static DiffPki {
                 &[
                     tlv(0x82, b"a.fuzz.test"),
                     tlv(0x81, b"a@fuzz.test"),
+                    tlv(0x86, b"https://fuzz.test/a"),
+                    tlv(0xa4, &dn("Fuzz Unit")),
                     tlv(0x87, &[10, 1, 2, 3]),
                 ]
                 .concat(),

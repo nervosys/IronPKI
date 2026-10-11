@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Verification
+- The differential fuzz fixtures carry URI and directory-name constraints
+  and names of both forms. Both targets ran three minutes each against
+  0.1.2 without a finding. That was after 0.1.2 was published; the
+  validator change in it had not been fuzzed before release.
+
 ## 0.1.2 (2026-10-10)
 
 directoryName and URI name constraints are evaluated, and the validator is

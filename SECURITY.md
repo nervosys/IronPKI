@@ -30,7 +30,7 @@ builds on. No CMVP certificate exists for either.
   paths and certificate signatures, with the five places this crate's
   verdict differs from the recorded one named and explained in the tests;
 - two fuzz targets with AddressSanitizer (`fuzz/`), one of which fails if the
-  two path validators disagree. The runs recorded there are short: two
+  two path validators disagree. The runs recorded there are short: three
   minutes each.
 
 - tests against OpenSSL 3.5 in both directions
