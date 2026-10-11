@@ -44,6 +44,7 @@ $ cargo test --locked --workspace --all-features
 $ cargo test --locked --workspace --no-default-features
 $ cargo build --no-default-features --target thumbv7em-none-eabihf
 $ python scripts/check-first-party-only.py --all-features
+$ cargo test --locked --test openssl_interop -- --ignored   # if openssl >= 3.5 is present
 ```
 
 If you changed a parser or either path validator, fuzz it as well (see

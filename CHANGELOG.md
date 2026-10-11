@@ -2,12 +2,44 @@
 
 ## Unreleased
 
+### Changed
+- directoryName constraints are evaluated (REQ-X509-086), where a path
+  under one used to be refused as unsupported. A name is within a subtree
+  whose relative distinguished names are the first of its own, in order
+  (RFC 5280 §4.2.1.10). The constraint governs a subject that is not empty
+  and directoryName alternative names alike, so a permitted subtree binds
+  the subject of every certificate below the constraining CA. Printable
+  ASCII in a PrintableString or a UTF8String is compared without regard to
+  case or spacing. Anything else is the same value only when its encoding
+  is: text outside ASCII, other string types, an IA5String that differs in
+  case, and a relative distinguished name of several attributes. Where that
+  leaves a comparison undecided, a permitted subtree does not cover the
+  name and an excluded one refuses the path.
+- uniformResourceIdentifier constraints are evaluated (REQ-X509-087),
+  likewise. The constraint governs the host of each URI alternative name: a
+  host names that host alone, and a domain with a leading dot every host
+  below it. A URI with no authority, or with an address for a host, is
+  refused wherever a URI constraint applies, as RFC 5280 requires; so is
+  every path under a constraint that is neither a host nor a domain.
+- One of IronPrivacyGuard's recorded paths is therefore judged differently,
+  and named in `tests/pyca_vectors.rs`: a leaf whose subject is the name a
+  directoryName constraint permits was recorded as refused, because the
+  constraint was not evaluated, and is now accepted. OpenSSL 3.5 accepts
+  it too.
+
 ### Verification
+- Agreement with OpenSSL 3.5 in both directions, in
+  `tests/openssl_interop.rs` (ignored unless asked for; they need `openssl`
+  on `PATH`). OpenSSL, with `-x509_strict`, verifies the chains this crate
+  issues with ECDSA P-256, P-384 and P-521, Ed25519 and ML-DSA-44, -65 and
+  -87 keys. Both validators here verify chains OpenSSL issues with those,
+  with RSA PKCS#1 v1.5 and with RSA-PSS, and refuse each under another root
+  and for another name. Each honours the other's CRL, revoked and not.
 - Two fuzz targets of this crate's own, in `fuzz/`: `pki`, for everything
   read as DER (certificates, CRLs, OCSP responses, trust anchors in both
   forms) under each purpose, and `pki_differential`, which fails if the two
   path validators disagree. The seed corpus includes every PyCA certificate
-  in `tests/vectors`. No change to the library.
+  in `tests/vectors`.
 
 ## 0.1.1 (2026-10-10)
 

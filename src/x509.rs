@@ -119,6 +119,8 @@ const T_SUBJECT_UID: u8 = 0x82;
 const T_GN_EMAIL: u8 = 0x81;
 const T_GN_DNS: u8 = 0x82;
 const T_GN_IP: u8 = 0x87;
+const T_GN_DIRECTORY: u8 = 0xa4;
+const T_GN_URI: u8 = 0x86;
 
 // keyUsage bit positions (RFC 5280 §4.2.1.3).
 const KU_DIGITAL_SIGNATURE: u16 = 1 << 0;
@@ -2156,6 +2158,14 @@ fn email_within(name: &[u8], constraint: &[u8]) -> Option<bool> {
         let (c_local, c_host) = mailbox(constraint)?;
         return Some(local == c_local && host.eq_ignore_ascii_case(c_host));
     }
+    host_within(host, constraint)
+}
+
+/// Whether `host` is within a constraint that names a host or a domain: a
+/// host names that host alone, and a domain with a leading dot names every
+/// host below it, not the domain itself. Case is not significant. `None`
+/// when the constraint is neither.
+fn host_within(host: &str, constraint: &[u8]) -> Option<bool> {
     let constraint = core::str::from_utf8(constraint).ok()?;
     if let Some(domain) = constraint.strip_prefix('.') {
         return is_valid_dns_name(domain, false).then(|| {
@@ -2166,13 +2176,158 @@ fn email_within(name: &[u8], constraint: &[u8]) -> Option<bool> {
     is_valid_dns_name(constraint, false).then(|| host.eq_ignore_ascii_case(constraint))
 }
 
+/// Whether a constraint base is a host or a domain [`host_within`] has a
+/// rule for.
+fn host_constraint_is_evaluable(base: &[u8]) -> bool {
+    core::str::from_utf8(base)
+        .is_ok_and(|c| is_valid_dns_name(c.strip_prefix('.').unwrap_or(c), false))
+}
+
 /// Whether an rfc822Name constraint base is one [`email_within`] has a rule for.
 fn email_constraint_is_evaluable(base: &[u8]) -> bool {
     if base.contains(&b'@') {
         return mailbox(base).is_some();
     }
-    core::str::from_utf8(base)
-        .is_ok_and(|c| is_valid_dns_name(c.strip_prefix('.').unwrap_or(c), false))
+    host_constraint_is_evaluable(base)
+}
+
+/// The host of a URI, when it has an authority whose host is a DNS name:
+/// `scheme://[userinfo@]host[:port]`, up to the first `/`, `?` or `#`. A URI
+/// without an authority, or with an address for a host, has none, and RFC
+/// 5280 §4.2.1.10 has a constrained certificate with such a name rejected.
+fn uri_host(uri: &[u8]) -> Option<&str> {
+    let uri = core::str::from_utf8(uri).ok()?;
+    let (scheme, rest) = uri.split_once(':')?;
+    let scheme_ok = scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+        && scheme
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'-' | b'.'));
+    let rest = rest.strip_prefix("//")?;
+    let authority = &rest[..rest.find(['/', '?', '#']).unwrap_or(rest.len())];
+    let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    let host = match host.rsplit_once(':') {
+        Some((h, port)) if port.bytes().all(|b| b.is_ascii_digit()) => h,
+        Some(_) => return None,
+        None => host,
+    };
+    (scheme_ok && is_valid_dns_name(host, false) && parse_ipv4(host).is_none()).then_some(host)
+}
+
+/// Whether the URI `name` is within the uniformResourceIdentifier constraint
+/// `constraint` (RFC 5280 §4.2.1.10), which governs its host alone. `None`
+/// when the URI has no host that is a DNS name, or the constraint is not a
+/// host or a domain; the caller refuses both. `REQ-X509-087`.
+fn uri_within(name: &[u8], constraint: &[u8]) -> Option<bool> {
+    host_within(uri_host(name)?, constraint)
+}
+
+/// Whether two byte strings hold the same words: runs of spaces count as one
+/// and those at either end as none, and ASCII case is not significant.
+fn same_words(a: &[u8], b: &[u8]) -> bool {
+    let words = |s| <[u8]>::split(s, |c| *c == b' ').filter(|w| !w.is_empty());
+    let (mut a, mut b) = (words(a), words(b));
+    loop {
+        match (a.next(), b.next()) {
+            (None, None) => return true,
+            (Some(x), Some(y)) if x.eq_ignore_ascii_case(y) => {}
+            _ => return false,
+        }
+    }
+}
+
+/// Whether two attribute values of one type are the same value. Identical
+/// encodings are. Otherwise only printable ASCII in a PrintableString, a
+/// UTF8String or an IA5String is compared, as RFC 5280 §7.1 has it: without
+/// regard to case or to the amount of white space. `None` when that cannot
+/// be decided here: text outside ASCII (comparing it takes Unicode
+/// normalisation and case folding), another string type, or an IA5String
+/// that differs only in case or spacing, where the answer depends on the
+/// attribute (the local part of an e-mail address is case-sensitive).
+fn directory_value_eq(a: (u8, &[u8]), b: (u8, &[u8])) -> Option<bool> {
+    if a == b {
+        return Some(true);
+    }
+    let text = |(tag, value): (u8, &[u8])| {
+        matches!(tag, T_UTF8 | T_PRINTABLE | T_IA5)
+            && value.iter().all(|c| (0x20..0x7f).contains(c))
+    };
+    if !text(a) || !text(b) {
+        return None;
+    }
+    if !same_words(a.1, b.1) {
+        return Some(false);
+    }
+    (a.0 != T_IA5 && b.0 != T_IA5).then_some(true)
+}
+
+/// How many attributes a relative distinguished name has, and the first.
+struct Rdn<'a> {
+    count: usize,
+    oid: &'a [u8],
+    value: (u8, &'a [u8]),
+}
+
+impl<'a> Rdn<'a> {
+    fn read(rdn: &'a [u8]) -> Result<Self> {
+        let mut set = Der::new(rdn);
+        let mut first = set.nested(T_SEQUENCE)?;
+        let oid = first.expect(T_OID)?;
+        let (tag, value, _) = first.tlv()?;
+        let mut count = 1;
+        while !set.is_empty() {
+            set.expect(T_SEQUENCE)?;
+            count += 1;
+        }
+        Ok(Self {
+            count,
+            oid,
+            value: (tag, value),
+        })
+    }
+}
+
+/// Whether two relative distinguished names (the contents of each SET) are
+/// equal. Sets of different sizes are not, nor are single attributes of
+/// different types. Two different encodings of several attributes each are
+/// undecided (`None`): their order depends on how each value is encoded.
+fn rdn_eq(a: &[u8], b: &[u8]) -> Result<Option<bool>> {
+    if a == b {
+        return Ok(Some(true));
+    }
+    let (a, b) = (Rdn::read(a)?, Rdn::read(b)?);
+    if a.count != b.count {
+        return Ok(Some(false));
+    }
+    if a.count != 1 {
+        return Ok(None);
+    }
+    Ok(if a.oid == b.oid {
+        directory_value_eq(a.value, b.value)
+    } else {
+        Some(false)
+    })
+}
+
+/// Whether the distinguished name `name` is within the directoryName
+/// constraint `base` (RFC 5280 §4.2.1.10): the base's relative distinguished
+/// names are the first of the name's, in order. Both are the contents of a
+/// Name. `None` when no name of the base is shown to differ and one could
+/// not be compared; a permitted subtree then does not cover the name, and
+/// an excluded one has the path refused. `REQ-X509-086`.
+fn directory_within(name: &[u8], base: &[u8]) -> Result<Option<bool>> {
+    let (mut name, mut base) = (Der::new(name), Der::new(base));
+    let mut undecided = false;
+    while !base.is_empty() {
+        if name.is_empty() {
+            return Ok(Some(false));
+        }
+        match rdn_eq(name.expect(T_SET)?, base.expect(T_SET)?)? {
+            Some(true) => {}
+            Some(false) => return Ok(Some(false)),
+            None => undecided = true,
+        }
+    }
+    Ok((!undecided).then_some(true))
 }
 
 /// Call `each` with every emailAddress value in a subject name. RFC 5280
@@ -2202,6 +2357,10 @@ fn subject_emails<'a>(
 /// REQ-X509-044: IP constraint masks use CIDR encoding, even for absent name families.
 /// REQ-X509-085: rfc822Name constraints govern rfc822Name alternative names
 /// and emailAddress attributes of the subject alike.
+/// REQ-X509-086: directoryName constraints govern a subject that is not
+/// empty and directoryName alternative names alike.
+/// REQ-X509-087: uniformResourceIdentifier constraints govern the host of
+/// each URI alternative name.
 fn apply_name_constraints(nc: &[u8], subjects: &[&Certificate<'_>]) -> Result<()> {
     let violation = || Error::new(ErrorKind::CertificateUsage, "name constraints violated");
     let unsupported = || {
@@ -2222,8 +2381,12 @@ fn apply_name_constraints(nc: &[u8], subjects: &[&Certificate<'_>]) -> Result<()
             let mut st = subtrees.nested(T_SEQUENCE)?;
             let (tag, base, _) = st.tlv()?;
             if !st.is_empty()
-                || !matches!(tag, T_GN_EMAIL | T_GN_DNS | T_GN_IP)
+                || !matches!(
+                    tag,
+                    T_GN_EMAIL | T_GN_DNS | T_GN_IP | T_GN_DIRECTORY | T_GN_URI
+                )
                 || (tag == T_GN_EMAIL && !email_constraint_is_evaluable(base))
+                || (tag == T_GN_URI && !host_constraint_is_evaluable(base))
             {
                 return Err(unsupported());
             }
@@ -2254,6 +2417,20 @@ fn apply_name_constraints(nc: &[u8], subjects: &[&Certificate<'_>]) -> Result<()
                         let name = core::str::from_utf8(value).map_err(|_| unsupported())?;
                         let constraint = core::str::from_utf8(base).map_err(|_| unsupported())?;
                         dns_within(dns_canonical(name), dns_canonical(constraint))
+                    } else if tag == T_GN_URI {
+                        // RFC 5280 has a URI with no host name rejected
+                        // wherever a URI constraint applies.
+                        uri_within(value, base).ok_or_else(unsupported)?
+                    } else if tag == T_GN_DIRECTORY {
+                        let mut base = Der::new(base);
+                        match directory_within(value, base.expect(T_SEQUENCE)?)? {
+                            Some(within) => within,
+                            // Not shown to be outside an excluded subtree:
+                            // refused. Not shown to be inside a permitted
+                            // one: not covered by it.
+                            None if is_excluded => return Err(unsupported()),
+                            None => false,
+                        }
                     } else {
                         ip_within(value, base)
                             || (is_excluded
@@ -2289,9 +2466,17 @@ fn apply_name_constraints(nc: &[u8], subjects: &[&Certificate<'_>]) -> Result<()
         let mut names = Der::new(cert.ext.san.unwrap_or(&[]));
         while !names.is_empty() {
             let (tag, value, _) = names.tlv()?;
-            if matches!(tag, T_GN_EMAIL | T_GN_DNS | T_GN_IP) {
+            if matches!(tag, T_GN_EMAIL | T_GN_DNS | T_GN_IP | T_GN_URI) {
                 check(tag, value)?;
+            } else if tag == T_GN_DIRECTORY {
+                let mut name = Der::new(value);
+                check(tag, name.expect(T_SEQUENCE)?)?;
             }
+        }
+        let mut subject = Der::new(cert.subject);
+        let subject = subject.expect(T_SEQUENCE)?;
+        if !subject.is_empty() {
+            check(T_GN_DIRECTORY, subject)?;
         }
         subject_emails(cert.subject, |address| check(T_GN_EMAIL, address))?;
     }
@@ -5227,10 +5412,7 @@ mod tests {
                         let result = parse_extensions(&encoded);
                         if accepted {
                             assert_eq!(result.unwrap().name_constraints, Some(body.as_slice()));
-                            assert_eq!(
-                                apply_name_constraints(&body, &[]).unwrap_err().kind(),
-                                ErrorKind::UnsupportedCertificate
-                            );
+                            apply_name_constraints(&body, &[]).unwrap();
                         } else {
                             assert_eq!(
                                 result.err().unwrap().kind(),
@@ -7797,7 +7979,8 @@ mod chain_tests {
             ErrorKind::CertificateUsage
         );
 
-        // A directoryName constraint is not evaluated, so it fails closed.
+        // A permitted directoryName subtree binds the subject: this leaf's
+        // is not under "Corp".
         let mut dn = Vec::new();
         push_tlv(&mut dn, 0xa4, &encode_name("Corp"));
         let mut st = Vec::new();
@@ -7819,7 +8002,7 @@ mod chain_tests {
         .unwrap();
         assert_eq!(
             err(verify_both(&leaf, &[&int3, &p.int], &p.roots, &opts())),
-            ErrorKind::UnsupportedCertificate
+            ErrorKind::CertificateUsage
         );
     }
 

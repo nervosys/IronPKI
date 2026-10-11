@@ -14,7 +14,7 @@ from 2020 to 2050 and are judged at Unix time 1,800,000,000.
 
 The last three record `accepted`, the verdict of IronPrivacyGuard's own
 validator, which this crate replaced there. `tests/pyca_vectors.rs` and
-`src/hardening_tests.rs` hold this crate to it, and name the four cases
+`src/hardening_tests.rs` hold this crate to it, and name the five cases
 where it differs on purpose.
 
 ## The endorsement-key file

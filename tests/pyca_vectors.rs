@@ -84,10 +84,18 @@ fn pyca_server_certificates_are_judged_as_recorded() {
     assert_eq!(differences, SERVER_DIFFERENCES.len());
 }
 
+/// The path this crate accepts and its recorded verdict refuses, with the
+/// rule that makes the difference.
+const PATH_DIFFERENCES: &[(&str, &str)] = &[(
+    "unsupported_directory_constraint_fails_closed",
+    "REQ-X509-086: a directoryName constraint is evaluated, not refused, and the leaf's \
+     subject is the permitted name itself. OpenSSL 3.5 accepts this path too",
+)];
+
 /// 30 paths: intermediates in any order, several anchors, path length,
 /// name constraints, validity, cross-signing. Judged for the endorsement-key
-/// purpose, as IronPrivacyGuard judged them. All agree. REQ-X509-002,
-/// REQ-X509-006, REQ-X509-008, REQ-X509-080.
+/// purpose, as IronPrivacyGuard judged them. All but one agree. REQ-X509-002,
+/// REQ-X509-006, REQ-X509-008, REQ-X509-080, REQ-X509-086.
 #[test]
 fn pyca_paths_are_judged_as_recorded() {
     let vectors = ic_json::parse(include_str!("vectors/x509-paths.json")).unwrap();
@@ -99,6 +107,7 @@ fn pyca_paths_are_judged_as_recorded() {
     );
     let cases = vectors.get("cases").unwrap().as_array().unwrap();
     assert_eq!(cases.len(), 30);
+    let mut differences = 0;
     for case in cases {
         let name = text(case, "name");
         let list = |key: &str| -> Vec<Vec<u8>> {
@@ -119,12 +128,21 @@ fn pyca_paths_are_judged_as_recorded() {
             let _ = roots.add_der(&anchor);
         }
         let recorded = case.get("accepted").unwrap().as_bool().unwrap();
+        let expected = match PATH_DIFFERENCES.iter().find(|(n, _)| *n == name) {
+            Some(_) => {
+                differences += 1;
+                assert!(!recorded, "{name} is listed as a difference");
+                true
+            }
+            None => recorded,
+        };
         let owned = verify_chain(&leaf, &intermediates, &roots, &opts);
-        assert_eq!(owned.is_ok(), recorded, "{name}: {:?}", owned.err());
+        assert_eq!(owned.is_ok(), expected, "{name}: {:?}", owned.err());
         // The fixed-slot validator holds at most seven intermediates.
         if intermediates.len() <= 7 {
             let fixed = verify_chain_fixed(&leaf, &intermediates, &roots, &opts);
-            assert_eq!(fixed.is_ok(), recorded, "{name} (fixed): {:?}", fixed.err());
+            assert_eq!(fixed.is_ok(), expected, "{name} (fixed): {:?}", fixed.err());
         }
     }
+    assert_eq!(differences, PATH_DIFFERENCES.len());
 }

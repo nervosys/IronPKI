@@ -16,6 +16,7 @@ $ cargo build --no-default-features --target thumbv7em-none-eabihf
 $ cargo +1.88 build --all-targets          # the declared rust-version
 $ python scripts/check-first-party-only.py --all-features
 $ cargo package --list                     # read what would be uploaded
+$ cargo test --locked --test openssl_interop -- --ignored   # if openssl >= 3.5 is present
 ```
 
 Check that `Cargo.toml` requires the IronCrypto version the release was

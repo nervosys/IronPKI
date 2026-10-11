@@ -390,12 +390,16 @@ impl Constrained {
         if !san_entries.is_empty() {
             exts.push(san(san_entries));
         }
+        self.verdict_with(subject, &exts)
+    }
+
+    fn verdict_with(&self, subject: &[u8], exts: &[Vec<u8>]) -> Option<ErrorKind> {
         let leaf = cert(
             3,
             &name("Int"),
             subject,
             self.leaf_key.spki(),
-            &exts,
+            exts,
             &self.int_key,
         );
         let (owned, fixed) = verdicts(&leaf, &[&self.int], &self.roots);
@@ -481,13 +485,11 @@ fn rfc822_name_constraints_are_evaluated() {
         "it cannot be shown to be outside the excluded subtree"
     );
 
-    // A constraint base there is no rule for refuses every path under it;
-    // so does a directory-name constraint, which is still not evaluated.
+    // A constraint base there is no rule for refuses every path under it.
     for nc in [
         constraints(&[(0x81, b"@example.com")], &[]),
         constraints(&[(0x81, b"a@")], &[]),
         constraints(&[], &[(0x81, b"exa mple.com")]),
-        constraints(&[(0xa4, &name("Org"))], &[]),
     ] {
         let c = Constrained::new(nc);
         assert_eq!(c.verdict(&leaf, &[(0x82, b"www.example.com")]), UNSUPPORTED);
@@ -566,4 +568,325 @@ fn pyca_certificate_signatures_are_judged_as_recorded() {
         accepted += usize::from(expected);
     }
     assert_eq!(accepted, 16, "15 recorded as accepted, and P-521");
+}
+
+const AT_CN: &[u8] = &[0x55, 0x04, 0x03];
+const AT_C: &[u8] = &[0x55, 0x04, 0x06];
+const AT_O: &[u8] = &[0x55, 0x04, 0x0a];
+const AT_DC: &[u8] = &[0x09, 0x92, 0x26, 0x89, 0x93, 0xf2, 0x2c, 0x64, 0x01, 0x19];
+const UTF8: u8 = 0x0c;
+const PRINTABLE: u8 = 0x13;
+const T61: u8 = 0x14;
+const IA5: u8 = 0x16;
+
+/// An attribute: type, string tag, value.
+type Attribute<'a> = (&'a [u8], u8, &'a [u8]);
+
+/// A Name: each inner slice is one relative distinguished name's attributes,
+/// given in DER order.
+fn dn(rdns: &[&[Attribute<'_>]]) -> Vec<u8> {
+    let body: Vec<u8> = rdns
+        .iter()
+        .flat_map(|rdn| {
+            let set: Vec<u8> = rdn
+                .iter()
+                .flat_map(|(oid, tag, value)| {
+                    tlv(0x30, &[tlv(0x06, oid), tlv(*tag, value)].concat())
+                })
+                .collect();
+            tlv(0x31, &set)
+        })
+        .collect();
+    tlv(0x30, &body)
+}
+
+/// REQ-X509-086: a directoryName constraint is evaluated, for the subject
+/// and for directoryName alternative names alike (RFC 5280 §4.2.1.10): a
+/// name is within a subtree whose relative distinguished names are the
+/// first of its own, in order, printable ASCII compared without regard to
+/// case or spacing. What cannot be compared here is never taken for a
+/// match under a permitted subtree, and refuses the path under an excluded
+/// one.
+#[test]
+fn directory_name_constraints_are_evaluated() {
+    let base = dn(&[
+        &[(AT_C, PRINTABLE, b"US")],
+        &[(AT_O, UTF8, b"Example Corp")],
+    ]);
+    let permitted = Constrained::new(constraints(&[(0xa4, &base)], &[]));
+    let under = |o_tag: u8, o: &[u8]| {
+        dn(&[
+            &[(AT_C, PRINTABLE, b"US")],
+            &[(AT_O, o_tag, o)],
+            &[(AT_CN, UTF8, b"leaf")],
+        ])
+    };
+    let good = under(UTF8, b"Example Corp");
+    assert_eq!(permitted.verdict(&good, &[]), None);
+    assert_eq!(
+        permitted.verdict(&under(PRINTABLE, b" example   CORP "), &[]),
+        None,
+        "another string type, case and spacing"
+    );
+    assert_eq!(permitted.verdict(&base, &[]), None, "the base itself");
+    assert_eq!(
+        permitted.verdict(&under(UTF8, b"Example Corporation"), &[]),
+        VIOLATION
+    );
+    assert_eq!(
+        permitted.verdict(&under(UTF8, b"ExampleCorp"), &[]),
+        VIOLATION
+    );
+    // Shorter than the base, the base's names in another order, a name
+    // that has them but does not begin with them, another attribute type.
+    for outside in [
+        dn(&[&[(AT_C, PRINTABLE, b"US")]]),
+        dn(&[
+            &[(AT_O, UTF8, b"Example Corp")],
+            &[(AT_C, PRINTABLE, b"US")],
+        ]),
+        dn(&[
+            &[(AT_CN, UTF8, b"leaf")],
+            &[(AT_C, PRINTABLE, b"US")],
+            &[(AT_O, UTF8, b"Example Corp")],
+        ]),
+        dn(&[
+            &[(AT_C, PRINTABLE, b"US")],
+            &[(AT_CN, UTF8, b"Example Corp")],
+        ]),
+        name("leaf"),
+    ] {
+        assert_eq!(permitted.verdict(&outside, &[]), VIOLATION, "{outside:?}");
+    }
+    // A directoryName alternative name is held to it as the subject is.
+    assert_eq!(permitted.verdict(&good, &[(0xa4, &good)]), None);
+    assert_eq!(
+        permitted.verdict(&good, &[(0xa4, &name("elsewhere"))]),
+        VIOLATION
+    );
+    // Names of other forms are not a directory name's business, and a
+    // subject that is empty is not a name to hold to it.
+    assert_eq!(permitted.verdict(&good, &[(0x82, b"www.other.org")]), None);
+    let critical_san = ext(
+        &[0x55, 0x1d, 0x11],
+        true,
+        &tlv(0x30, &tlv(0x82, b"www.other.org")),
+    );
+    let nameless = [basic_constraints(false), key_usage(false), critical_san];
+    assert_eq!(permitted.verdict_with(&tlv(0x30, &[]), &nameless), None);
+
+    // Excluded.
+    let evil = dn(&[&[(AT_O, UTF8, b"Evil")]]);
+    let excluded = Constrained::new(constraints(&[], &[(0xa4, &evil)]));
+    let org = |tag: u8, o: &[u8]| dn(&[&[(AT_O, tag, o)], &[(AT_CN, UTF8, b"leaf")]]);
+    assert_eq!(excluded.verdict(&org(UTF8, b"Good"), &[]), None);
+    assert_eq!(excluded.verdict(&name("leaf"), &[]), None);
+    assert_eq!(excluded.verdict(&org(UTF8, b"Evil"), &[]), VIOLATION);
+    assert_eq!(excluded.verdict(&org(PRINTABLE, b"EVIL "), &[]), VIOLATION);
+    assert_eq!(
+        excluded.verdict(&org(UTF8, b"Good"), &[(0xa4, &evil)]),
+        VIOLATION
+    );
+    assert_eq!(
+        excluded.verdict(&org(T61, b"Evil"), &[]),
+        UNSUPPORTED,
+        "a string type with no rule cannot be shown to differ"
+    );
+
+    // Text outside ASCII is the same only when its encoding is.
+    let zurich = |o: &str| dn(&[&[(AT_O, UTF8, o.as_bytes())], &[(AT_CN, UTF8, b"leaf")]]);
+    let base = dn(&[&[(AT_O, UTF8, "Zürich".as_bytes())]]);
+    let permitted = Constrained::new(constraints(&[(0xa4, &base)], &[]));
+    assert_eq!(permitted.verdict(&zurich("Zürich"), &[]), None);
+    assert_eq!(permitted.verdict(&zurich("ZÜRICH"), &[]), VIOLATION);
+    let excluded = Constrained::new(constraints(&[], &[(0xa4, &base)]));
+    assert_eq!(excluded.verdict(&zurich("Zürich"), &[]), VIOLATION);
+    assert_eq!(excluded.verdict(&zurich("ZÜRICH"), &[]), UNSUPPORTED);
+    assert_eq!(excluded.verdict(&name("leaf"), &[]), None, "another type");
+
+    // An IA5String that differs only in case is not decided either way.
+    let dc = |v: &[u8]| dn(&[&[(AT_DC, IA5, v)], &[(AT_CN, UTF8, b"leaf")]]);
+    let base = dn(&[&[(AT_DC, IA5, b"example")]]);
+    let permitted = Constrained::new(constraints(&[(0xa4, &base)], &[]));
+    assert_eq!(permitted.verdict(&dc(b"example"), &[]), None);
+    assert_eq!(permitted.verdict(&dc(b"EXAMPLE"), &[]), VIOLATION);
+    let excluded = Constrained::new(constraints(&[], &[(0xa4, &base)]));
+    assert_eq!(excluded.verdict(&dc(b"example"), &[]), VIOLATION);
+    assert_eq!(excluded.verdict(&dc(b"EXAMPLE"), &[]), UNSUPPORTED);
+    assert_eq!(excluded.verdict(&dc(b"other"), &[]), None);
+
+    // Several attributes in one relative distinguished name are the same
+    // only when their encoding is; a different number of them never is.
+    let pair = |o_tag: u8, o: &[u8]| dn(&[&[(AT_CN, UTF8, b"a"), (AT_O, o_tag, o)]]);
+    let permitted = Constrained::new(constraints(&[(0xa4, &pair(UTF8, b"b"))], &[]));
+    assert_eq!(permitted.verdict(&pair(UTF8, b"b"), &[]), None);
+    assert_eq!(permitted.verdict(&pair(PRINTABLE, b"B"), &[]), VIOLATION);
+    let excluded = Constrained::new(constraints(&[], &[(0xa4, &pair(UTF8, b"b"))]));
+    assert_eq!(excluded.verdict(&pair(UTF8, b"b"), &[]), VIOLATION);
+    assert_eq!(excluded.verdict(&pair(PRINTABLE, b"B"), &[]), UNSUPPORTED);
+    assert_eq!(excluded.verdict(&name("a"), &[]), None);
+
+    // An empty base is the root of every name.
+    let all = tlv(0x30, &[]);
+    let permitted = Constrained::new(constraints(&[(0xa4, &all)], &[]));
+    assert_eq!(permitted.verdict(&name("leaf"), &[]), None);
+    let excluded = Constrained::new(constraints(&[], &[(0xa4, &all)]));
+    assert_eq!(excluded.verdict(&name("leaf"), &[]), VIOLATION);
+}
+
+/// REQ-X509-086: a directoryName constraint binds the subject of a CA
+/// below the constraining one as it binds the leaf's, in both validators.
+#[test]
+fn a_directory_name_constraint_binds_the_cas_below_it() {
+    let corp = dn(&[&[(AT_O, UTF8, b"Corp")]]);
+    let within = |cn: &[u8]| dn(&[&[(AT_O, UTF8, b"Corp")], &[(AT_CN, UTF8, cn)]]);
+    for (sub_subject, expected) in [(within(b"Sub"), None), (name("Sub"), VIOLATION)] {
+        let c = Constrained::new(constraints(&[(0xa4, &corp)], &[]));
+        let sub_key = key();
+        let sub = cert(
+            4,
+            &name("Int"),
+            &sub_subject,
+            sub_key.spki(),
+            &[basic_constraints(true), key_usage(true)],
+            &c.int_key,
+        );
+        let leaf = cert(
+            5,
+            &sub_subject,
+            &within(b"leaf"),
+            c.leaf_key.spki(),
+            &[basic_constraints(false), key_usage(false)],
+            &sub_key,
+        );
+        let (owned, fixed) = verdicts(&leaf, &[&sub, &c.int], &c.roots);
+        assert_eq!(owned, fixed, "the two validators disagree");
+        assert_eq!(owned, expected);
+    }
+}
+
+/// REQ-X509-087: a uniformResourceIdentifier constraint is evaluated
+/// against the host of each URI alternative name (RFC 5280 §4.2.1.10): a
+/// host names that host alone, and a domain with a leading dot every host
+/// below it and not the domain. A URI with no host that is a DNS name, or a
+/// constraint that is neither, refuses the path.
+#[test]
+fn uri_name_constraints_are_evaluated() {
+    let leaf = name("leaf");
+    let host = Constrained::new(constraints(&[(0x86, b"example.com")], &[]));
+    for inside in [
+        &b"https://example.com/path"[..],
+        b"https://example.com",
+        b"https://EXAMPLE.com:8443/x?y#z",
+        b"spiffe://example.com/workload",
+        b"https://user:secret@example.com/",
+        b"https://example.com?q=https://other.org/",
+    ] {
+        assert_eq!(host.verdict(&leaf, &[(0x86, inside)]), None);
+    }
+    for outside in [
+        &b"https://www.example.com/"[..],
+        b"https://other.org/",
+        b"https://notexample.com/",
+        b"https://example.com.other.org/",
+        // What looks like the host is the user, the path, the query or the
+        // fragment.
+        b"https://example.com@other.org/",
+        b"https://example.com:443@other.org/",
+        b"https://other.org/@example.com",
+        b"https://other.org?@example.com",
+        b"https://other.org#@example.com",
+        b"https://other.org/https://example.com/",
+    ] {
+        assert_eq!(
+            host.verdict(&leaf, &[(0x86, outside)]),
+            VIOLATION,
+            "{}",
+            core::str::from_utf8(outside).unwrap()
+        );
+    }
+    // No host name to hold to the constraint: rejected, as RFC 5280 has it.
+    for none in [
+        &b"urn:uuid:f81d4fae-7dec-11d0-a765-00a0c91e6bf6"[..],
+        b"mailto:a@example.com",
+        b"https://192.0.2.1/",
+        b"https://[2001:db8::1]/",
+        b"https://[2001:db8::1]:443/",
+        b"https:///path",
+        b"https://example.com:port/",
+        b"//example.com/",
+        b"1https://example.com/",
+        b"example.com",
+        b"https://exa%6dple.com/",
+    ] {
+        assert_eq!(
+            host.verdict(&leaf, &[(0x86, none)]),
+            UNSUPPORTED,
+            "{}",
+            core::str::from_utf8(none).unwrap()
+        );
+    }
+    // One bad URI among good ones is enough, and other forms are not held
+    // to a URI constraint.
+    assert_eq!(
+        host.verdict(
+            &leaf,
+            &[
+                (0x86, b"https://example.com/"),
+                (0x86, b"https://other.org/")
+            ]
+        ),
+        VIOLATION
+    );
+    assert_eq!(host.verdict(&leaf, &[(0x82, b"www.other.org")]), None);
+
+    // Permitted: hosts below a domain, and not the domain.
+    let below = Constrained::new(constraints(&[(0x86, b".example.com")], &[]));
+    assert_eq!(
+        below.verdict(&leaf, &[(0x86, b"https://a.example.com/")]),
+        None
+    );
+    assert_eq!(
+        below.verdict(&leaf, &[(0x86, b"https://a.b.Example.com/")]),
+        None
+    );
+    assert_eq!(
+        below.verdict(&leaf, &[(0x86, b"https://example.com/")]),
+        VIOLATION
+    );
+    assert_eq!(
+        below.verdict(&leaf, &[(0x86, b"https://notexample.com/")]),
+        VIOLATION
+    );
+
+    // Excluded.
+    let excluded = Constrained::new(constraints(&[], &[(0x86, b"example.com")]));
+    assert_eq!(
+        excluded.verdict(&leaf, &[(0x86, b"https://other.org/")]),
+        None
+    );
+    assert_eq!(
+        excluded.verdict(&leaf, &[(0x86, b"https://www.example.com/")]),
+        None,
+        "a host names that host alone"
+    );
+    assert_eq!(
+        excluded.verdict(&leaf, &[(0x86, b"https://Example.com/")]),
+        VIOLATION
+    );
+    assert_eq!(
+        excluded.verdict(&leaf, &[(0x86, b"urn:example:thing")]),
+        UNSUPPORTED,
+        "it cannot be shown to be outside the excluded subtree"
+    );
+
+    // A constraint that is not a host or a domain refuses every path.
+    for nc in [
+        constraints(&[(0x86, b"https://example.com")], &[]),
+        constraints(&[], &[(0x86, b"exa mple.com")]),
+        constraints(&[(0x86, b".")], &[]),
+    ] {
+        let c = Constrained::new(nc);
+        assert_eq!(c.verdict(&leaf, &[(0x82, b"www.example.com")]), UNSUPPORTED);
+    }
 }
