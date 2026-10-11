@@ -34,10 +34,11 @@ builds on. No CMVP certificate exists for either.
   minutes each.
 
 - tests against OpenSSL 3.5 in both directions
-  (`tests/openssl_interop.rs`): each verifies the chains the other issues
-  and honours the other's CRLs. They cover what OpenSSL will issue from its
-  command line, which is well-formed; OCSP responses and name constraints
-  are not among them.
+  (`tests/openssl_interop.rs`): each verifies the chains the other issues,
+  honours the other's CRLs and reads the other's OCSP responses; and 63
+  certificates under name constraints of every form evaluated here get the
+  same verdict from OpenSSL and from both validators. They cover what
+  OpenSSL will issue from its command line, which is well-formed.
 
 Most of the code and its tests came from IronSocketLayer 0.3.4, where it was
 also exercised against public servers through TLS handshakes. **That has not

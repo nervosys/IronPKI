@@ -34,7 +34,14 @@
   issues with ECDSA P-256, P-384 and P-521, Ed25519 and ML-DSA-44, -65 and
   -87 keys. Both validators here verify chains OpenSSL issues with those,
   with RSA PKCS#1 v1.5 and with RSA-PSS, and refuse each under another root
-  and for another name. Each honours the other's CRL, revoked and not.
+  and for another name. Each honours the other's CRL, revoked and not, and
+  reads the other's OCSP responses, good and revoked.
+- Name constraints judged beside OpenSSL: 63 OpenSSL-issued leaves under
+  permitted and excluded DNS, address, e-mail, URI and directory-name
+  subtrees get the same verdict from OpenSSL and from both validators
+  here, and the verdict RFC 5280 gives. One rule is left out as a
+  deliberate difference: a wildcard reaching into an excluded DNS subtree
+  is refused here and read literally by OpenSSL.
 - Two fuzz targets of this crate's own, in `fuzz/`: `pki`, for everything
   read as DER (certificates, CRLs, OCSP responses, trust anchors in both
   forms) under each purpose, and `pki_differential`, which fails if the two

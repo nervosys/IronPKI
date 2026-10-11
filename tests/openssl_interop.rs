@@ -545,3 +545,504 @@ fn this_crate_honours_the_crls_openssl_issues() {
         }
     }
 }
+
+/// An OpenSSL CA and a leaf with serial 0x1234, and OpenSSL's OCSP response
+/// for the leaf from an index in which its status is `flag` (`V` or `R`).
+fn openssl_ocsp_fixture(dir: &Path, flag: char, digest: &str) {
+    let ec = ["-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256"];
+    let base = ["req", "-x509", "-nodes", "-days", "2"];
+    must(
+        &[
+            &base[..],
+            &ec,
+            &[
+                "-keyout",
+                "cakey.pem",
+                "-out",
+                "ca.pem",
+                "-subj",
+                "/CN=OpenSSL OCSP CA",
+                "-addext",
+                "basicConstraints=critical,CA:TRUE",
+                "-addext",
+                "keyUsage=critical,keyCertSign,cRLSign",
+            ],
+        ]
+        .concat(),
+        dir,
+    );
+    must(
+        &[
+            &base[..],
+            &ec,
+            &[
+                "-keyout",
+                "key.pem",
+                "-out",
+                "leaf.pem",
+                "-CA",
+                "ca.pem",
+                "-CAkey",
+                "cakey.pem",
+                "-set_serial",
+                "0x1234",
+                "-subj",
+                "/CN=leaf",
+                "-addext",
+                "subjectAltName=DNS:leaf.interop.test",
+                "-addext",
+                "basicConstraints=critical,CA:FALSE",
+                "-addext",
+                "keyUsage=critical,digitalSignature",
+            ],
+        ]
+        .concat(),
+        dir,
+    );
+    let line = match flag {
+        'R' => "R\t300101000000Z\t250101000000Z\t1234\tunknown\t/CN=leaf\n",
+        _ => "V\t300101000000Z\t\t1234\tunknown\t/CN=leaf\n",
+    };
+    std::fs::write(dir.join("index.txt"), line).unwrap();
+    // The CertID digest option must precede -cert.
+    let mut args = vec![
+        "ocsp",
+        "-index",
+        "index.txt",
+        "-rsigner",
+        "ca.pem",
+        "-rkey",
+        "cakey.pem",
+        "-CA",
+        "ca.pem",
+        "-issuer",
+        "ca.pem",
+    ];
+    if !digest.is_empty() {
+        args.push(digest);
+    }
+    args.extend_from_slice(&["-cert", "leaf.pem", "-respout", "resp.der", "-ndays", "1"]);
+    must(&args, dir);
+}
+
+/// This crate reads the OCSP responses OpenSSL signs: good is good, with a
+/// SHA-1 CertID (whose hashes it cannot check, and says so) and a SHA-256
+/// one; revoked is refused; and a response is no use for another
+/// certificate or under another issuer's key.
+#[test]
+#[ignore = "needs openssl 3.5+ on PATH"]
+fn this_crate_judges_the_ocsp_responses_openssl_signs() {
+    use ironpki::x509::ocsp::{CertStatus, verify_response};
+    let stranger = chain(Kind::P256);
+    for (flag, digest) in [('V', ""), ('V', "-sha256"), ('R', "")] {
+        let dir = workdir(&format!("ocsp-openssl-{flag}{digest}"));
+        openssl_ocsp_fixture(&dir, flag, digest);
+        let (ca, leaf) = (read_cert(&dir, "ca.pem"), read_cert(&dir, "leaf.pem"));
+        let response = std::fs::read(dir.join("resp.der")).unwrap();
+        let mut roots = RootStore::new();
+        roots.add_der(&ca).unwrap();
+        let opts = VerifyOptions::new(
+            now(),
+            Purpose::TlsServer,
+            VERIFY_ALGORITHMS,
+            Limits::DEFAULT,
+        );
+        let path = verify_chain(&leaf, &[], &roots, &opts).unwrap();
+        let judge = |leaf: &[u8], spki: &[u8]| {
+            verify_response(
+                &response,
+                leaf,
+                &path.anchor_subject,
+                spki,
+                now(),
+                VERIFY_ALGORITHMS,
+            )
+        };
+        let verdict = judge(&leaf, &path.anchor_spki);
+        if flag == 'R' {
+            assert_eq!(verdict.unwrap_err().kind(), ErrorKind::CertificateRevoked);
+            continue;
+        }
+        let verified = verdict.unwrap_or_else(|e| panic!("{flag}{digest}: {e}"));
+        assert_eq!(verified.status, CertStatus::Good);
+        assert!(!verified.delegated);
+        assert_eq!(verified.cert_id_hashes_checked, digest == "-sha256");
+        assert!(
+            judge(&stranger.leaf, &path.anchor_spki).is_err(),
+            "{digest}: a response for another certificate"
+        );
+        let other_key = x509::Certificate::parse(&stranger.root).unwrap();
+        assert!(
+            judge(&leaf, other_key.spki_der()).is_err(),
+            "{digest}: a response another issuer's key did not sign"
+        );
+    }
+}
+
+/// OpenSSL's OCSP verifier accepts the responses this crate signs and reads
+/// the status in each.
+#[test]
+#[ignore = "needs openssl 3.5+ on PATH"]
+fn openssl_judges_the_ocsp_responses_this_crate_signs() {
+    use ironpki::x509::ocsp::{CertStatus, build_response};
+    let c = chain(Kind::P256);
+    let t = now();
+    for (label, status, expected) in [
+        ("good", CertStatus::Good, "leaf.pem: good"),
+        (
+            "revoked",
+            CertStatus::Revoked { at: t - 600 },
+            "leaf.pem: revoked",
+        ),
+    ] {
+        let dir = workdir(&format!("ocsp-ours-{label}"));
+        let response = build_response(
+            &c.leaf,
+            &c.int,
+            &c.int_key,
+            status,
+            t - 60,
+            t + 3600,
+            &mut rng(),
+        )
+        .unwrap();
+        let pem = |der: &[u8]| to_pem(ic_pkix::pem::CERTIFICATE, der);
+        std::fs::write(
+            dir.join("chain.pem"),
+            format!("{}{}", pem(&c.root), pem(&c.int)),
+        )
+        .unwrap();
+        std::fs::write(dir.join("int.pem"), pem(&c.int)).unwrap();
+        std::fs::write(dir.join("leaf.pem"), pem(&c.leaf)).unwrap();
+        std::fs::write(dir.join("resp.der"), &response).unwrap();
+        // This crate's CertIDs are SHA-256 (IronCrypto has no SHA-1), so
+        // OpenSSL must look the certificate up by SHA-256; its default is
+        // SHA-1.
+        let (_, text) = openssl(
+            &[
+                "ocsp",
+                "-respin",
+                "resp.der",
+                "-CAfile",
+                "chain.pem",
+                "-issuer",
+                "int.pem",
+                "-sha256",
+                "-cert",
+                "leaf.pem",
+            ],
+            &dir,
+        );
+        assert!(text.contains("Response verify OK"), "{label}: {text}");
+        assert!(text.contains(expected), "{label}: {text}");
+    }
+}
+
+/// A leaf under a constrained OpenSSL CA: its subject, its alternative
+/// names in OpenSSL's notation, and whether a path to it is good.
+type Leaf = (&'static str, &'static str, bool);
+
+/// Name constraints, judged by OpenSSL and by both validators here on the
+/// same OpenSSL-issued certificates: every verdict is the same, and is the
+/// one RFC 5280 §4.2.1.10 gives. REQ-X509-008, REQ-X509-085, REQ-X509-086,
+/// REQ-X509-087.
+///
+/// One rule is left out because the two differ on purpose: a wildcard that
+/// reaches into an excluded DNS subtree is refused here, and OpenSSL reads
+/// it as a literal name.
+#[test]
+#[ignore = "needs openssl 3.5+ on PATH"]
+fn name_constraints_are_judged_as_openssl_judges_them() {
+    const PLAIN: &str = "/CN=Leaf One";
+    const CORP: &str = "C=US\nO=Example Corp\n";
+    let cases: &[(&str, &str, &[Leaf])] = &[
+        (
+            "permitted;DNS:example.com",
+            "",
+            &[
+                (PLAIN, "DNS:a.example.com", true),
+                (PLAIN, "DNS:example.com", true),
+                (PLAIN, "DNS:A.Example.COM", true),
+                (PLAIN, "DNS:*.example.com", true),
+                (PLAIN, "DNS:a.other.org", false),
+                (PLAIN, "DNS:notexample.com", false),
+                (PLAIN, "DNS:a.example.com,DNS:a.other.org", false),
+                (PLAIN, "IP:192.0.2.1", true),
+            ],
+        ),
+        (
+            "excluded;DNS:evil.example.com",
+            "",
+            &[
+                (PLAIN, "DNS:good.example.com", true),
+                (PLAIN, "DNS:evil.example.com", false),
+                (PLAIN, "DNS:x.Evil.example.com", false),
+                (PLAIN, "DNS:notevil.example.com", true),
+            ],
+        ),
+        (
+            "permitted;DNS:example.com,excluded;DNS:bad.example.com",
+            "",
+            &[
+                (PLAIN, "DNS:a.example.com", true),
+                (PLAIN, "DNS:bad.example.com", false),
+                (PLAIN, "DNS:other.org", false),
+            ],
+        ),
+        (
+            "permitted;IP:10.0.0.0/255.0.0.0",
+            "",
+            &[
+                (PLAIN, "IP:10.1.2.3", true),
+                (PLAIN, "IP:192.0.2.1", false),
+                (PLAIN, "IP:2001:db8::1", false),
+                (PLAIN, "DNS:a.example.com", true),
+            ],
+        ),
+        (
+            "excluded;IP:10.0.0.0/255.0.0.0",
+            "",
+            &[(PLAIN, "IP:10.1.2.3", false), (PLAIN, "IP:192.0.2.1", true)],
+        ),
+        (
+            "permitted;email:example.com",
+            "",
+            &[
+                (PLAIN, "email:a@example.com", true),
+                (PLAIN, "email:a@Example.COM", true),
+                (PLAIN, "email:a@other.org", false),
+                (PLAIN, "email:a@mail.example.com", false),
+                ("/CN=Leaf One/emailAddress=a@example.com", "", true),
+                ("/CN=Leaf One/emailAddress=a@other.org", "", false),
+            ],
+        ),
+        (
+            "permitted;email:.example.com",
+            "",
+            &[
+                (PLAIN, "email:a@mail.example.com", true),
+                (PLAIN, "email:a@example.com", false),
+            ],
+        ),
+        (
+            "permitted;email:a@example.com",
+            "",
+            &[
+                (PLAIN, "email:a@example.com", true),
+                (PLAIN, "email:b@example.com", false),
+            ],
+        ),
+        (
+            "excluded;email:example.com",
+            "",
+            &[
+                (PLAIN, "email:a@other.org", true),
+                (PLAIN, "email:a@example.com", false),
+            ],
+        ),
+        (
+            "permitted;URI:example.com",
+            "",
+            &[
+                (PLAIN, "URI:https://example.com/path", true),
+                (PLAIN, "URI:https://EXAMPLE.com:8443/", true),
+                (PLAIN, "URI:https://www.example.com/", false),
+                (PLAIN, "URI:https://other.org/https://example.com/", false),
+                (PLAIN, "URI:https://example.com@other.org/", false),
+                (
+                    PLAIN,
+                    "URI:urn:uuid:f81d4fae-7dec-11d0-a765-00a0c91e6bf6",
+                    false,
+                ),
+                (PLAIN, "URI:https://192.0.2.1/", false),
+                (PLAIN, "DNS:a.other.org", true),
+            ],
+        ),
+        (
+            "permitted;URI:.example.com",
+            "",
+            &[
+                (PLAIN, "URI:https://a.example.com/", true),
+                (PLAIN, "URI:https://a.b.example.com/", true),
+                (PLAIN, "URI:https://example.com/", false),
+                (PLAIN, "URI:https://notexample.com/", false),
+            ],
+        ),
+        (
+            "excluded;URI:example.com",
+            "",
+            &[
+                (PLAIN, "URI:https://example.com/", false),
+                (PLAIN, "URI:https://other.org/", true),
+            ],
+        ),
+        (
+            "permitted;dirName:base",
+            CORP,
+            &[
+                ("/C=US/O=Example Corp/CN=Leaf One", "", true),
+                ("/C=US/O=example  CORP/CN=Leaf One", "", true),
+                ("/C=US/O=Example Corp", "", true),
+                ("/C=US/O=Other/CN=Leaf One", "", false),
+                ("/C=US/O=Example Corporation/CN=Leaf One", "", false),
+                ("/O=Example Corp/C=US/CN=Leaf One", "", false),
+                ("/CN=Leaf One/C=US/O=Example Corp", "", false),
+                ("/C=US", "", false),
+                ("/C=US/O=Example Corp/CN=Leaf One", "dirName:inside", true),
+                ("/C=US/O=Example Corp/CN=Leaf One", "dirName:outside", false),
+                ("/C=US/O=Example Corp/CN=Leaf One", "DNS:a.other.org", true),
+            ],
+        ),
+        (
+            "excluded;dirName:base",
+            "O=Evil\n",
+            &[
+                ("/O=Good/CN=Leaf One", "", true),
+                (PLAIN, "", true),
+                ("/O=Evil/CN=Leaf One", "", false),
+                ("/O=EVIL/CN=Leaf One", "", false),
+                ("/O=Good/CN=Leaf One", "dirName:evil", false),
+            ],
+        ),
+    ];
+    let ec = ["-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256"];
+    let base = ["req", "-x509", "-nodes", "-days", "2", "-config", "nc.cnf"];
+    let mut judged = 0;
+    for (n, (constraint, base_name, leaves)) in cases.iter().enumerate() {
+        let dir = workdir(&format!("nc-{n}"));
+        let config = |alternative_names: &str| {
+            let san = if alternative_names.is_empty() {
+                String::new()
+            } else {
+                format!("subjectAltName={alternative_names}\n")
+            };
+            format!(
+                "[req]\ndistinguished_name=dn\n[dn]\n\
+                 [root_ext]\nbasicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign\n\
+                 [ca_ext]\nbasicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign\n\
+                 nameConstraints=critical,{constraint}\n\
+                 [leaf_ext]\nbasicConstraints=critical,CA:FALSE\n\
+                 keyUsage=critical,digitalSignature\n{san}\
+                 [base]\n{base_name}\
+                 [inside]\n{CORP}OU=Unit\n[outside]\nC=US\nO=Elsewhere\n[evil]\nO=Evil\nCN=x\n"
+            )
+        };
+        std::fs::write(dir.join("nc.cnf"), config("")).unwrap();
+        must(
+            &[
+                &base[..],
+                &ec,
+                &[
+                    "-extensions",
+                    "root_ext",
+                    "-subj",
+                    "/CN=NC Root",
+                    "-keyout",
+                    "rootkey.pem",
+                    "-out",
+                    "root.pem",
+                ],
+            ]
+            .concat(),
+            &dir,
+        );
+        must(
+            &[
+                &base[..],
+                &ec,
+                &[
+                    "-extensions",
+                    "ca_ext",
+                    "-subj",
+                    "/CN=NC Intermediate",
+                    "-CA",
+                    "root.pem",
+                    "-CAkey",
+                    "rootkey.pem",
+                    "-keyout",
+                    "intkey.pem",
+                    "-out",
+                    "int.pem",
+                ],
+            ]
+            .concat(),
+            &dir,
+        );
+        let (root, int) = (read_cert(&dir, "root.pem"), read_cert(&dir, "int.pem"));
+        let mut roots = RootStore::new();
+        roots.add_der(&root).unwrap();
+        for (subject, alternative_names, expected) in *leaves {
+            let what = format!("{constraint} [{base_name:?}]: {subject} {alternative_names}");
+            std::fs::write(dir.join("nc.cnf"), config(alternative_names)).unwrap();
+            must(
+                &[
+                    &base[..],
+                    &ec,
+                    &[
+                        "-extensions",
+                        "leaf_ext",
+                        "-subj",
+                        subject,
+                        "-CA",
+                        "int.pem",
+                        "-CAkey",
+                        "intkey.pem",
+                        "-keyout",
+                        "key.pem",
+                        "-out",
+                        "leaf.pem",
+                    ],
+                ]
+                .concat(),
+                &dir,
+            );
+            let (theirs, text) = openssl(
+                &[
+                    "verify",
+                    "-x509_strict",
+                    "-CAfile",
+                    "root.pem",
+                    "-untrusted",
+                    "int.pem",
+                    "leaf.pem",
+                ],
+                &dir,
+            );
+            let leaf = read_cert(&dir, "leaf.pem");
+            let opts = VerifyOptions::new(
+                now(),
+                Purpose::TlsServer,
+                VERIFY_ALGORITHMS,
+                Limits::DEFAULT,
+            );
+            let owned = verify_chain(&leaf, &[&int], &roots, &opts);
+            let fixed = verify_chain_fixed(&leaf, &[&int], &roots, &opts);
+            assert_eq!(
+                owned.as_ref().err().map(|e| e.kind()),
+                fixed.as_ref().err().map(|e| e.kind()),
+                "{what}: the two validators disagree"
+            );
+            assert_eq!(theirs, *expected, "{what}: OpenSSL says {text}");
+            assert_eq!(owned.is_ok(), *expected, "{what}: {:?}", owned.err());
+            if !expected {
+                // Refused for the constraint, not for something else.
+                assert!(
+                    text.contains("permitted subtree violation")
+                        || text.contains("excluded subtree violation")
+                        || text.contains("unsupported name constraint")
+                        || text.contains("unsupported or invalid name"),
+                    "{what}: {text}"
+                );
+                assert!(
+                    matches!(
+                        owned.unwrap_err().kind(),
+                        ErrorKind::CertificateUsage | ErrorKind::UnsupportedCertificate
+                    ),
+                    "{what}"
+                );
+            }
+            judged += 1;
+        }
+    }
+    assert_eq!(judged, 63);
+}
