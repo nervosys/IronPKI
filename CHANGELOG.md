@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Added
+- `x509::check_cnsa1_keys` and `x509::check_cnsa2_keys` (REQ-CFG-009): the
+  key of every certificate given, whether a path uses it or not, must be
+  one of its CNSA suite: P-384 or RSA of 3072 or 4096 bits (RFC 8603
+  section 4.1), or ML-DSA-87 or ML-KEM-1024
+  (draft-jenkins-cnsa2-pkix-profile-05 section 4). `check_cnsa1_rsa_keys`
+  remains, for the RSA rule alone.
+
+### Changed
+- An OCSP response built here identifies the certificate with SHA-384
+  hashes, where it used SHA-256 (REQ-OCSP-035). The CNSA certificate
+  profiles allow no shorter hash outside a signature. Verification is
+  unchanged: SHA-256, SHA-384 and SHA-512 CertIDs are checked in full,
+  SHA-1 by serial and signature. A verifier that looks a certificate up by
+  one hash only must now be asked for SHA-384 (`openssl ocsp -sha384`).
+
 ### Verification
 - The differential fuzz fixtures carry URI and directory-name constraints
   and names of both forms. Both targets ran three minutes each against

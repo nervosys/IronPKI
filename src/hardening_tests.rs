@@ -890,3 +890,112 @@ fn uri_name_constraints_are_evaluated() {
         assert_eq!(c.verdict(&leaf, &[(0x82, b"www.example.com")]), UNSUPPORTED);
     }
 }
+
+/// REQ-CFG-009: under the CNSA profiles every certificate presented carries
+/// a key of the suite, whether a path uses it or not (RFC 8603 section 4.1;
+/// draft-jenkins-cnsa2-pkix-profile-05 section 4). An ML-KEM-1024 key is a
+/// key of the 2.0 suite although nothing here reads it; a certificate that
+/// does not parse is passed over, as path validation passes over it.
+#[test]
+fn cnsa_profiles_hold_every_presented_key_to_the_suite() {
+    let signer = key();
+    let with_spki = |spki: &[u8]| {
+        cert(
+            7,
+            &name("Issuer"),
+            &name("Subject"),
+            spki,
+            &[basic_constraints(false), key_usage(false)],
+            &signer,
+        )
+    };
+    let of = |kind| with_spki(SigningKey::generate(kind, &mut rng()).unwrap().spki());
+    let other_spki = |oid: &[u8], len: usize| {
+        let mut bits = vec![0u8; len + 1];
+        bits[1..].fill(0x5a);
+        tlv(
+            0x30,
+            &[tlv(0x30, &tlv(0x06, oid)), tlv(0x03, &bits)].concat(),
+        )
+    };
+    let ml_kem = |n: u8, len| with_spki(&other_spki(&[0x60, 0x86, 0x48, 1, 0x65, 3, 4, 4, n], len));
+    let ml_kem_1024 = ml_kem(3, 1568);
+    let ml_kem_768 = ml_kem(2, 1184);
+    let unparseable = vec![0x30, 0x03, 0x02, 0x01];
+    let verdict = |r: crate::Result<()>| r.err().map(|e| (e.kind(), e.context()));
+    let no1 = Some((
+        ErrorKind::PolicyViolation,
+        "CNSA 1.0 allows P-384 and RSA keys only",
+    ));
+    let no2 = Some((
+        ErrorKind::PolicyViolation,
+        "CNSA 2.0 allows ML-DSA-87 and ML-KEM-1024 keys only",
+    ));
+    for (kind, in1, in2) in [
+        (KeyKind::EcdsaP256, false, false),
+        (KeyKind::EcdsaP384, true, false),
+        (KeyKind::EcdsaP521, false, false),
+        (KeyKind::Ed25519, false, false),
+        (KeyKind::MlDsa44, false, false),
+        (KeyKind::MlDsa65, false, false),
+        (KeyKind::MlDsa87, false, true),
+    ] {
+        let c = of(kind);
+        let one = [c.as_slice()];
+        assert_eq!(
+            verdict(x509::check_cnsa1_keys(one.iter().copied())),
+            if in1 { None } else { no1 },
+            "{kind:?}"
+        );
+        assert_eq!(
+            verdict(x509::check_cnsa2_keys(one.iter().copied())),
+            if in2 { None } else { no2 },
+            "{kind:?}"
+        );
+    }
+    let check1 = |certs: &[&[u8]]| verdict(x509::check_cnsa1_keys(certs.iter().copied()));
+    let check2 = |certs: &[&[u8]]| verdict(x509::check_cnsa2_keys(certs.iter().copied()));
+    assert_eq!(check2(&[&ml_kem_1024]), None);
+    assert_eq!(check2(&[&ml_kem_768]), no2);
+    assert_eq!(check1(&[&ml_kem_1024]), no1);
+    // One key outside the suite among several is enough, wherever it is;
+    // what is not a certificate is not a key outside the suite.
+    let (p384, p256, ml87) = (
+        of(KeyKind::EcdsaP384),
+        of(KeyKind::EcdsaP256),
+        of(KeyKind::MlDsa87),
+    );
+    assert_eq!(check1(&[&p384, &unparseable, &p384]), None);
+    assert_eq!(check1(&[&p384, &p384, &p256]), no1);
+    assert_eq!(check1(&[&p256, &p384]), no1);
+    assert_eq!(check1(&[]), None);
+    assert_eq!(check2(&[&ml87, &unparseable, &ml_kem_1024]), None);
+    assert_eq!(check2(&[&ml87, &p384]), no2);
+    // An RSA key is still held to its own rule under CNSA 1.0.
+    let rsa = |bits: usize| {
+        let mut modulus = vec![0xffu8; bits / 8];
+        modulus[bits / 8 - 1] = 0xfb;
+        let key = [
+            tlv(0x02, &[&[0u8][..], &modulus].concat()),
+            tlv(0x02, &[1, 0, 1]),
+        ]
+        .concat();
+        let mut bits = vec![0u8];
+        bits.extend(tlv(0x30, &key));
+        let alg = [
+            tlv(0x06, &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 1, 1, 1]),
+            tlv(0x05, &[]),
+        ]
+        .concat();
+        with_spki(&tlv(0x30, &[tlv(0x30, &alg), tlv(0x03, &bits)].concat()))
+    };
+    assert_eq!(check1(&[&rsa(3072)]), None);
+    assert_eq!(
+        check1(&[&rsa(2048)]),
+        Some((
+            ErrorKind::PolicyViolation,
+            "CNSA 1.0 allows RSA moduli of 3072 or 4096 bits only"
+        ))
+    );
+    assert_eq!(check2(&[&rsa(3072)]), no2);
+}

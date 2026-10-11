@@ -627,14 +627,14 @@ fn openssl_ocsp_fixture(dir: &Path, flag: char, digest: &str) {
 
 /// This crate reads the OCSP responses OpenSSL signs: good is good, with a
 /// SHA-1 CertID (whose hashes it cannot check, and says so) and a SHA-256
-/// one; revoked is refused; and a response is no use for another
+/// or SHA-384 one; revoked is refused; and a response is no use for another
 /// certificate or under another issuer's key.
 #[test]
 #[ignore = "needs openssl 3.5+ on PATH"]
 fn this_crate_judges_the_ocsp_responses_openssl_signs() {
     use ironpki::x509::ocsp::{CertStatus, verify_response};
     let stranger = chain(Kind::P256);
-    for (flag, digest) in [('V', ""), ('V', "-sha256"), ('R', "")] {
+    for (flag, digest) in [('V', ""), ('V', "-sha256"), ('V', "-sha384"), ('R', "")] {
         let dir = workdir(&format!("ocsp-openssl-{flag}{digest}"));
         openssl_ocsp_fixture(&dir, flag, digest);
         let (ca, leaf) = (read_cert(&dir, "ca.pem"), read_cert(&dir, "leaf.pem"));
@@ -666,7 +666,7 @@ fn this_crate_judges_the_ocsp_responses_openssl_signs() {
         let verified = verdict.unwrap_or_else(|e| panic!("{flag}{digest}: {e}"));
         assert_eq!(verified.status, CertStatus::Good);
         assert!(!verified.delegated);
-        assert_eq!(verified.cert_id_hashes_checked, digest == "-sha256");
+        assert_eq!(verified.cert_id_hashes_checked, !digest.is_empty());
         assert!(
             judge(&stranger.leaf, &path.anchor_spki).is_err(),
             "{digest}: a response for another certificate"
@@ -715,8 +715,8 @@ fn openssl_judges_the_ocsp_responses_this_crate_signs() {
         std::fs::write(dir.join("int.pem"), pem(&c.int)).unwrap();
         std::fs::write(dir.join("leaf.pem"), pem(&c.leaf)).unwrap();
         std::fs::write(dir.join("resp.der"), &response).unwrap();
-        // This crate's CertIDs are SHA-256 (IronCrypto has no SHA-1), so
-        // OpenSSL must look the certificate up by SHA-256; its default is
+        // This crate's CertIDs are SHA-384 (IronCrypto has no SHA-1), so
+        // OpenSSL must look the certificate up by SHA-384; its default is
         // SHA-1.
         let (_, text) = openssl(
             &[
@@ -727,7 +727,7 @@ fn openssl_judges_the_ocsp_responses_this_crate_signs() {
                 "chain.pem",
                 "-issuer",
                 "int.pem",
-                "-sha256",
+                "-sha384",
                 "-cert",
                 "leaf.pem",
             ],

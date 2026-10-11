@@ -658,11 +658,13 @@ fn generalized_time(out: &mut Vec<u8>, t: u64) -> Result<()> {
 }
 
 /// Build a signed OCSP response for `leaf_der`, signed directly by its issuer
-/// (`issuer_der`, `issuer_key`), with a SHA-256 CertID and the responder
+/// (`issuer_der`, `issuer_key`), with a SHA-384 CertID and the responder
 /// identified by name.
 ///
-/// The CertID is SHA-256 because IronCrypto has no SHA-1. IronSocketLayer and
-/// verifiers that match on the response's own hash algorithm accept it;
+/// REQ-OCSP-035: the CertID is SHA-384. IronCrypto has no SHA-1, and SHA-384
+/// is the one hash every profile this stack serves allows outside a
+/// signature (the CNSA certificate profiles allow nothing shorter).
+/// Verifiers that match on the response's own hash algorithm accept it;
 /// clients that look a certificate up only by a SHA-1 CertID (OpenSSL's
 /// default lookup, for one) find no status for it.
 /// REQ-OCSP-021: issuance refuses nextUpdate earlier than thisUpdate.
@@ -727,11 +729,11 @@ fn build_signed(
         None => issuer.subject,
     };
     let name_hash =
-        digest(OID_SHA256, issuer.subject).ok_or(Error::new(ErrorKind::Internal, "hash"))?;
-    let key_hash = digest(OID_SHA256, spki_key_bits(issuer.spki)?)
+        digest(OID_SHA384, issuer.subject).ok_or(Error::new(ErrorKind::Internal, "hash"))?;
+    let key_hash = digest(OID_SHA384, spki_key_bits(issuer.spki)?)
         .ok_or(Error::new(ErrorKind::Internal, "hash"))?;
     build_signed_with_cert_id(
-        OID_SHA256,
+        OID_SHA384,
         &name_hash,
         &key_hash,
         leaf.serial,
@@ -1133,8 +1135,31 @@ mod tests {
         }
     }
 
+    /// REQ-OCSP-035: a response built here names the certificate by SHA-384
+    /// hashes of its issuer's name and key, and by nothing shorter.
+    #[test]
+    fn built_responses_identify_the_certificate_with_sha384() {
+        let f = fixture();
+        let response = make(&f, CertStatus::Good, f.now - 60, f.now + 3600);
+        let ca = Certificate::parse(&f.ca).unwrap();
+        let wrap = |tag, body: &[u8]| {
+            let mut out = Vec::new();
+            push_tlv(&mut out, tag, body);
+            out
+        };
+        let contains = |needle: &[u8]| response.windows(needle.len()).any(|w| w == needle);
+        let hash = |oid, data| wrap(T_OCTET_STRING, &digest(oid, data).unwrap());
+        let key = spki_key_bits(ca.spki).unwrap();
+        assert!(contains(&wrap(T_OID, OID_SHA384)));
+        assert!(contains(&hash(OID_SHA384, ca.subject)));
+        assert!(contains(&hash(OID_SHA384, key)));
+        assert!(!contains(&wrap(T_OID, OID_SHA256)));
+        assert!(!contains(&hash(OID_SHA256, ca.subject)));
+        assert!(check(&f, &response, f.now).unwrap().cert_id_hashes_checked);
+    }
+
     /// REQ-OCSP-001, REQ-OCSP-004: a good response from the issuer verifies,
-    /// with the SHA-256 CertID checked in full.
+    /// with its CertID checked in full.
     #[test]
     fn a_good_response_verifies() {
         let f = fixture();

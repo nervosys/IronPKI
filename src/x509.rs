@@ -1858,6 +1858,67 @@ pub fn check_cnsa1_rsa_keys<'a>(certs: impl Iterator<Item = &'a [u8]>) -> Result
     Ok(())
 }
 
+/// id-alg-ml-kem-1024, 2.16.840.1.101.3.4.4.3.
+const OID_ML_KEM_1024: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x03];
+
+/// The algorithm a SubjectPublicKeyInfo names.
+fn spki_algorithm(spki: &[u8]) -> Result<&[u8]> {
+    let mut outer = Der::new(spki);
+    outer.nested(T_SEQUENCE)?.nested(T_SEQUENCE)?.expect(T_OID)
+}
+
+/// `REQ-CFG-009`: RFC 8603 section 4.1 has every CNSA Suite certificate
+/// carry a P-384 key or an RSA key of 3072 or 4096 bits. Checks each
+/// certificate a peer presented under the CNSA 1.0 profile, whether a path
+/// uses it or not: a key of any other kind, or one that cannot be read, is
+/// `policy-violation`, and an RSA key is held to [`check_cnsa1_rsa_keys`]'s
+/// rule. A certificate that does not parse was ignored by path validation
+/// and is ignored here.
+pub fn check_cnsa1_keys<'a>(certs: impl Iterator<Item = &'a [u8]>) -> Result<()> {
+    for der in certs {
+        let Ok(cert) = Certificate::parse(der) else {
+            continue;
+        };
+        match cert.subject_public_key() {
+            Ok(PublicKey::EcP384(_)) => {}
+            Ok(key @ PublicKey::Rsa { .. }) => check_cnsa1_rsa_key(&key)?,
+            _ => {
+                return Err(Error::new(
+                    ErrorKind::PolicyViolation,
+                    "CNSA 1.0 allows P-384 and RSA keys only",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `REQ-CFG-009`: draft-jenkins-cnsa2-pkix-profile-05 section 4 has every
+/// CNSA Suite certificate carry an ML-DSA-87 key or an ML-KEM-1024 key.
+/// Checks each certificate a peer presented under the CNSA 2.0 profile,
+/// whether a path uses it or not: any other key is `policy-violation`. An
+/// ML-KEM-1024 key is recognised by its algorithm and not read. A
+/// certificate that does not parse was ignored by path validation and is
+/// ignored here.
+pub fn check_cnsa2_keys<'a>(certs: impl Iterator<Item = &'a [u8]>) -> Result<()> {
+    for der in certs {
+        let Ok(cert) = Certificate::parse(der) else {
+            continue;
+        };
+        match cert.subject_public_key() {
+            Ok(PublicKey::MlDsa87(_)) => {}
+            Err(_) if spki_algorithm(cert.spki) == Ok(OID_ML_KEM_1024) => {}
+            _ => {
+                return Err(Error::new(
+                    ErrorKind::PolicyViolation,
+                    "CNSA 2.0 allows ML-DSA-87 and ML-KEM-1024 keys only",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// `REQ-CFG-008`: the rule for one key; a key that is not RSA passes.
 fn check_cnsa1_rsa_key(key: &PublicKey<'_>) -> Result<()> {
     if let PublicKey::Rsa { exponent, .. } = key {
