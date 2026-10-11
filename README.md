@@ -60,6 +60,9 @@ python scripts/check-first-party-only.py --all-features
 cargo build --no-default-features --target thumbv7em-none-eabihf
 ```
 
+After a change to a parser or to either path validator, fuzz it as well: see
+[fuzz/README.md](fuzz/README.md).
+
 ## Licence
 
 AGPL-3.0-or-later; see [LICENSE](LICENSE). A commercial licence is available

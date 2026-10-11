@@ -46,5 +46,9 @@ $ cargo build --no-default-features --target thumbv7em-none-eabihf
 $ python scripts/check-first-party-only.py --all-features
 ```
 
+If you changed a parser or either path validator, fuzz it as well (see
+[fuzz/README.md](fuzz/README.md)). A crash input becomes a regression test
+alongside the fix.
+
 Never claim FIPS 140-3 validation or an independent review, in code,
 documentation or commit messages. Neither exists.

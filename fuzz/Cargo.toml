@@ -1,0 +1,46 @@
+[package]
+name = "ironpki-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "libFuzzer targets for IronPKI's parsers and validators. Not part of the library."
+
+[package.metadata]
+cargo-fuzz = true
+
+# libfuzzer-sys is the one third-party dependency in this repository, and it
+# is here, outside the published crate's graph: this package is its own
+# workspace, so `scripts/check-first-party-only.py` and `cargo deny`, which
+# look at the library, never see it.
+[dependencies]
+libfuzzer-sys = "0.4"
+ironpki = { path = ".." }
+ic-core = { version = ">=0.2.21, <0.3" }
+ic-drbg = { version = ">=0.2.21, <0.3" }
+ic-pkix = { version = ">=0.2.21, <0.3" }
+ic-sig = { version = ">=0.2.21, <0.3" }
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "seed-corpus"
+path = "src/seed.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "pki"
+path = "fuzz_targets/pki.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pki_differential"
+path = "fuzz_targets/pki_differential.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

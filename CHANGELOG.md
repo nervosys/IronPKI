@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Verification
+- Two fuzz targets of this crate's own, in `fuzz/`: `pki`, for everything
+  read as DER (certificates, CRLs, OCSP responses, trust anchors in both
+  forms) under each purpose, and `pki_differential`, which fails if the two
+  path validators disagree. The seed corpus includes every PyCA certificate
+  in `tests/vectors`. No change to the library.
+
 ## 0.1.1 (2026-10-10)
 
 rfc822Name constraints are evaluated, and 93 more independently generated
