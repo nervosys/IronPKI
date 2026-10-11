@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.1.2 (2026-10-10)
+
+directoryName and URI name constraints are evaluated, and the validator is
+compared with OpenSSL 3.5. No API change.
 
 ### Changed
 - directoryName constraints are evaluated (REQ-X509-086), where a path
