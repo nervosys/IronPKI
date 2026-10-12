@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 (not released)
+## 0.2.0 (2026-10-11)
 
 A caller can say which certificate policies it accepts. One breaking
 change: `VerifyOptions`, `ChainReport` and `FixedChainReport` can no
@@ -43,6 +43,10 @@ longer be built or matched field by field outside this crate.
   OpenSSL as `-policy`, `-explicit_policy`, `-inhibit_map` and
   `-inhibit_any`: 46 in all, the same verdict from OpenSSL and from both
   validators on each.
+- Fuzzing under AddressSanitizer, without a finding: both targets for 301
+  s each with the caller's policy inputs varied, and `pki` for 1,801 s
+  (8,220,571 runs). `pki_differential` also ran 1,801 s on 0.1.3 as
+  released (4,467,003 runs).
 
 ## 0.1.3 (2026-10-11)
 

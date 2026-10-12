@@ -58,7 +58,11 @@ ASan on Windows):
 | `pki` | 658,801 | 301 s |
 | `pki_differential` | 596,268 | 301 s |
 
-These are short runs. 0.1.2's own change to the validator was fuzzed only
+Two longer runs, 1,801 s each, without a finding: `pki_differential` on
+0.1.3 as released (4,467,003 runs), and `pki` on 0.2.0 before its release
+(8,220,571 runs).
+
+The runs in the table are short. 0.1.2's own change to the validator was fuzzed only
 after it was published (three minutes a target, without a finding). The
 same two targets ran against this code from
 IronSocketLayer before it moved here (525,508 and 267,672 runs in 91 s each,
