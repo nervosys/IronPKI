@@ -47,6 +47,11 @@ change.
   and anyPolicy. 400,000 paths; those that exhaust the budget are counted
   and held to fewer than one in a thousand.
 
+## 0.1.4 (2026-10-12, from branch release-0.1.x)
+
+0.2.1's fixes, backported to the 0.1 line for IronSocketLayer 0.4 and
+those who reach IronPKI through it. See that branch's changelog.
+
 ## 0.2.0 (2026-10-11)
 
 A caller can say which certificate policies it accepts. One breaking
