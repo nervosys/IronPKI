@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.2 (2026-10-12)
+
+NIST's PKITS policy cases join the tests. No change to the library.
 
 ### Verification
 - NIST's PKITS, sections 4.8 to 4.12 (certificate policies,
