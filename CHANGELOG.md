@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.1 (not released)
+## 0.2.1 (2026-10-11)
 
 Two defects in how certificate policy processing bounds its work, both in
 0.1.3 and 0.2.0. Neither accepted a path it should not have. No API
