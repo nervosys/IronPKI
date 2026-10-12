@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.4 (not released)
+## 0.1.4 (2026-10-12)
 
 0.2.1's fixes to certificate policy processing, for those who stay on
 0.1: IronSocketLayer 0.4 depends on this line. Neither defect accepted a
