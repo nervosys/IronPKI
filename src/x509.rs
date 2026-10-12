@@ -63,6 +63,7 @@ pub mod crl;
 pub mod ocsp;
 #[path = "x509_policy.rs"]
 mod policy;
+pub use policy::{MAX_ACCEPTABLE, PolicyOptions, PolicyOutcome};
 
 const OID_ECDSA_SHA1: &[u8] = &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x01];
 const OID_ECDSA_SHA256: &[u8] = &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x02];
@@ -1779,8 +1780,10 @@ impl RootStore {
 // Path validation
 // ---------------------------------------------------------------------------
 
-/// Parameters of [`verify_chain`].
+/// Parameters of [`verify_chain`]. Made with [`VerifyOptions::new`]; the
+/// fields are then set as needed.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub struct VerifyOptions<'s> {
     /// The current time, Unix seconds.
     pub now: u64,
@@ -1809,6 +1812,11 @@ pub struct VerifyOptions<'s> {
     /// endorsement key, where a result has to mean that the key chains to a
     /// root the caller chose. `REQ-X509-084`.
     pub accept_anchor_as_leaf: bool,
+    /// What is asked of certificate policies: which are acceptable, and
+    /// whether one is required. [`new`](Self::new) sets RFC 5280's defaults,
+    /// under which a path fails on policy grounds only where a certificate
+    /// on it requires a policy and none is valid. `REQ-X509-090`.
+    pub policy: PolicyOptions<'s>,
 }
 
 impl<'s> VerifyOptions<'s> {
@@ -1831,12 +1839,14 @@ impl<'s> VerifyOptions<'s> {
             crls: None,
             require_crl: false,
             accept_anchor_as_leaf: usage.leaf_signs(),
+            policy: PolicyOptions::any(),
         }
     }
 }
 
 /// What a successful verification established.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ChainReport {
     /// Signature links verified: intermediates plus one. Zero when the leaf is
     /// itself a trust anchor (pinned).
@@ -1865,6 +1875,8 @@ pub struct ChainReport {
     pub issuer_spki: Vec<u8>,
     /// Whether every non-anchor certificate was shown good by a current CRL.
     pub crl_checked: bool,
+    /// What certificate policy processing established. `REQ-X509-090`.
+    pub policy: PolicyOutcome,
 }
 
 /// `REQ-CFG-008`: RFC 9151 section 5.2 supports RSA with a modulus of 3072
@@ -2624,7 +2636,7 @@ impl<'c> Search<'c, '_, '_> {
         }
         // REQ-X509-088: from the certificate the anchor issued to the leaf.
         let policies: Vec<_> = chain.iter().rev().map(|c| c.policy_cert()).collect();
-        policy::check(&policies)
+        policy::check(&policies, &self.opts.policy).map(|_| ())
     }
 
     /// Extend `path` (indices into `ints`, leaf-side first) to an anchor.
@@ -2785,6 +2797,7 @@ pub fn verify_chain(
     opts: &VerifyOptions<'_>,
 ) -> Result<ChainReport> {
     check_limits(end_entity, intermediates, roots, &opts.limits)?;
+    opts.policy.validate()?;
     let leaf = Certificate::parse(end_entity)?;
     if leaf.ext.unknown_critical {
         return Err(Error::new(
@@ -2824,6 +2837,7 @@ pub fn verify_chain(
         issuer_subject: leaf.issuer.to_vec(),
         issuer_spki: leaf.spki.to_vec(),
         crl_checked: false,
+        policy: PolicyOutcome::default(),
     };
 
     // A leaf that is itself an anchor is pinned: accepted by exact key,
@@ -2855,6 +2869,14 @@ pub fn verify_chain(
     let mut path = Vec::new();
     let mut budget = opts.limits.max_signature_checks;
     let anchor = search.extend(&leaf, &mut path, &mut report.schemes, &mut budget)?;
+    // The path is settled: what policy processing found for it.
+    let policies: Vec<_> = search
+        .chain_certs(&leaf, &path)
+        .iter()
+        .rev()
+        .map(|c| c.policy_cert())
+        .collect();
+    report.policy = policy::check(&policies, &opts.policy)?;
     let a = roots
         .anchors
         .get(anchor)
@@ -2917,9 +2939,12 @@ pub fn verify_chain(
 
 /// Certificate-path facts that borrow the initialized trust store and peer DER.
 /// `REQ-FIX-003`: at most eight links and 100 candidate checks, without allocation.
+#[non_exhaustive]
 pub struct FixedChainReport<'a> {
     /// Whether every non-anchor certificate was shown good by a current CRL.
     pub crl_checked: bool,
+    /// What certificate policy processing established. `REQ-X509-090`.
+    pub policy: PolicyOutcome,
     /// Signature links, leaf first, followed by empty slots.
     pub schemes: [Option<SignatureScheme>; 8],
     /// Number of verified signature links.
@@ -2974,6 +2999,7 @@ pub fn verify_chain_fixed<'a>(
     opts: &VerifyOptions<'_>,
 ) -> Result<FixedChainReport<'a>> {
     check_limits(end_entity, intermediates, roots, &opts.limits)?;
+    opts.policy.validate()?;
     if intermediates.len() > 7 || opts.limits.max_path_len > 8 {
         return Err(Error::new(
             ErrorKind::CapacityExceeded,
@@ -2990,6 +3016,7 @@ pub fn verify_chain_fixed<'a>(
     }
     let mut report = FixedChainReport {
         crl_checked: false,
+        policy: PolicyOutcome::default(),
         schemes: [None; 8],
         depth: 0,
         min_classical_bits: leaf_key(&leaf, opts)?.map_or(u16::MAX, |k| k.classical_bits()),
@@ -3018,6 +3045,17 @@ pub fn verify_chain_fixed<'a>(
         opts: &'o VerifyOptions<'o>,
     }
     impl<'a> SearchFixed<'a, '_> {
+        /// Policy processing for the path through `path` (leaf side
+        /// first), in slots as the path itself is.
+        fn policies(&self, leaf: &Certificate<'a>, path: &[usize]) -> Result<PolicyOutcome> {
+            let mut certs = [policy::PolicyCert::default(); 8];
+            for (slot, &i) in certs.iter_mut().zip(path.iter().rev()) {
+                *slot = self.ints[i].as_ref().ok_or(bad("path slot"))?.policy_cert();
+            }
+            *certs.get_mut(path.len()).ok_or(bad("path slot"))? = leaf.policy_cert();
+            policy::check(&certs[..=path.len()], &self.opts.policy)
+        }
+
         fn extend(
             &self,
             leaf: &Certificate<'a>,
@@ -3074,12 +3112,7 @@ pub fn verify_chain_fixed<'a>(
                     }
                     // REQ-X509-088: from the certificate the anchor issued
                     // to the leaf, in slots as the path itself is.
-                    let mut policies = [policy::PolicyCert::default(); 8];
-                    for (slot, &i) in policies.iter_mut().zip(path[..depth].iter().rev()) {
-                        *slot = self.ints[i].as_ref().ok_or(bad("path slot"))?.policy_cert();
-                    }
-                    *policies.get_mut(depth).ok_or(bad("path slot"))? = leaf.policy_cert();
-                    policy::check(&policies[..=depth])?;
+                    self.policies(leaf, &path[..depth])?;
                     Ok(ai)
                 })();
                 match result {
@@ -3138,6 +3171,7 @@ pub fn verify_chain_fixed<'a>(
     report.anchor_subject = &anchor.subject;
     report.anchor_spki = &anchor.spki;
     report.depth = report.schemes.iter().take_while(|s| s.is_some()).count();
+    report.policy = search.policies(&leaf, &path[..report.depth.saturating_sub(1)])?;
     report.min_classical_bits = report
         .min_classical_bits
         .min(sign::public_key(&anchor.spki)?.classical_bits());

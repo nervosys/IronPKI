@@ -1,44 +1,53 @@
-//! Certificate policy processing: RFC 5280 section 6.1, for the inputs a
-//! caller gives who names no policy of its own.
+//! Certificate policy processing: RFC 5280 section 6.1.
 //!
-//! Those inputs are the defaults: any policy is acceptable
-//! (user-initial-policy-set is anyPolicy), no explicit policy is required at
-//! the start, and neither policy mapping nor anyPolicy is inhibited at the
-//! start. A path then fails on policy grounds in one way only: some
-//! certificate on it requires an explicit policy (`policyConstraints`), and
-//! by the time the requirement takes effect no policy is valid for the whole
-//! path. Whether one is depends on `certificatePolicies`, `policyMappings`
-//! and `inhibitAnyPolicy` all the way down, which is what is computed here.
+//! The caller's inputs are [`PolicyOptions`]: the policies it accepts
+//! (user-initial-policy-set), whether one is required from the start, and
+//! whether policy mapping and anyPolicy are inhibited from the start. The
+//! defaults are the RFC's: any policy is acceptable, and nothing is required
+//! or inhibited.
+//!
+//! A path fails on policy grounds in one way: an explicit policy is
+//! required, by the caller or by a certificate on the path
+//! (`policyConstraints`), and where the requirement takes effect no policy
+//! the caller accepts is valid for the whole path. Whether one is depends on
+//! `certificatePolicies`, `policyMappings` and `inhibitAnyPolicy` all the
+//! way down, which is what is computed here.
 //!
 //! # No tree
 //!
 //! RFC 5280 describes the computation as a tree that is grown and pruned.
 //! Both path validators call this, and one of them does not allocate, so
-//! the tree is not built. With these inputs the outcome depends only on
-//! whether the tree's last level is empty, and whether a policy has a node
-//! on a level is a function of the level above:
+//! the tree is not built. The outcome depends only on the tree's last
+//! level, and whether a policy has a node on a level is a function of the
+//! level above:
 //!
 //! - a policy a certificate asserts has a node if a node above expects it,
-//!   or if the level above has an anyPolicy node (6.1.3 (d) (1));
+//!   or, when none does, if the level above has an anyPolicy node (6.1.3
+//!   (d) (1));
 //! - where a certificate asserts anyPolicy and may, every policy a node
 //!   above expects has a node (6.1.3 (d) (2));
 //! - a node expects its own policy, unless the certificate maps that policy:
 //!   then it expects what the policy is mapped to, or, where mapping is
-//!   inhibited, it is deleted (6.1.4 (b)).
+//!   inhibited, it is deleted; and a mapped policy with no node gets one
+//!   under an anyPolicy node (6.1.4 (b)).
 //!
-//! A level with an anyPolicy node is settled by that alone: every policy a
-//! certificate below it lists has a node, and so does anyPolicy if the
-//! certificate asserts it. That is asked first at each step, so the rules
-//! for a single policy are only ever applied to a level without an
-//! anyPolicy node, and need not provide for one: not for the node a mapping
-//! creates under anyPolicy, and not for the expectations of the anyPolicy
-//! node itself.
+//! # The caller's policies
+//!
+//! A caller that names policies accepts a path for one of them when a node
+//! on the last level descends from a node of that policy whose parent is an
+//! anyPolicy node (6.1.5 (g)): the policy is compared in the trust anchor's
+//! own domain, before any mapping, not with what the leaf lists. So each
+//! rule above also says where a node's ancestry begins: under an anyPolicy
+//! node it begins with the node itself, and otherwise it is its parent's.
+//! Where the last level has an anyPolicy node, every policy the caller
+//! names is valid.
 //!
 //! These are evaluated on demand, by rescanning the borrowed extensions.
 //! A level's nodes are enumerated only when an anyPolicy assertion needs
 //! them. The work is bounded: a certificate has at most [`MAX_POLICIES`]
-//! policies and as many mappings, and a path is given [`BUDGET`]
-//! evaluations, beyond which it is refused.
+//! policies and as many mappings, a caller names at most
+//! [`MAX_ACCEPTABLE`], and a path is given [`BUDGET`] evaluations for all
+//! of them together, beyond which it is refused.
 
 use super::{Der, T_INTEGER, T_OID, T_SEQUENCE, bad, check_oid_encoding, small_uint};
 use crate::error::{Error, ErrorKind, Result};
@@ -55,6 +64,107 @@ const BUDGET: u32 = 8192;
 
 /// The most certificates below the anchor a path may have here.
 const MAX_LEVELS: usize = 64;
+
+/// The most policies a caller may name as acceptable: one bit each in
+/// [`PolicyOutcome::valid`].
+pub const MAX_ACCEPTABLE: usize = 64;
+
+/// What the caller asks of certificate policies: the inputs of RFC 5280
+/// section 6.1.1 (c) to (f). `REQ-X509-090`.
+///
+/// A policy is named by the contents of its OBJECT IDENTIFIER, without tag
+/// or length: `&[0x2a, 0x03, 0x04]` is 1.2.3.4.
+///
+/// Naming policies does not by itself require one. As the RFC has it, a
+/// path with no policies at all is still accepted unless a policy is
+/// required, by `require_explicit` or by a certificate on the path. A
+/// caller that means "only these policies" wants [`PolicyOptions::require`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PolicyOptions<'s> {
+    /// The policies the caller accepts (user-initial-policy-set), at most
+    /// [`MAX_ACCEPTABLE`]. Empty, or with anyPolicy among them: any policy.
+    pub acceptable: &'s [&'s [u8]],
+    /// Require a valid policy from the start of the path
+    /// (initial-explicit-policy).
+    pub require_explicit: bool,
+    /// Allow no policy mapping anywhere on the path
+    /// (initial-policy-mapping-inhibit).
+    pub inhibit_mapping: bool,
+    /// Give anyPolicy no meaning anywhere on the path
+    /// (initial-any-policy-inhibit).
+    pub inhibit_any: bool,
+}
+
+impl<'s> PolicyOptions<'s> {
+    /// RFC 5280's defaults: any policy is acceptable, none is required, and
+    /// nothing is inhibited.
+    pub const fn any() -> Self {
+        Self {
+            acceptable: &[],
+            require_explicit: false,
+            inhibit_mapping: false,
+            inhibit_any: false,
+        }
+    }
+
+    /// Accept only a path for which one of `acceptable` is valid: the
+    /// policies named, and a policy required from the start.
+    pub const fn require(acceptable: &'s [&'s [u8]]) -> Self {
+        Self {
+            acceptable,
+            require_explicit: true,
+            inhibit_mapping: false,
+            inhibit_any: false,
+        }
+    }
+
+    /// Whether any policy is acceptable.
+    fn accepts_any(&self) -> bool {
+        self.acceptable.is_empty() || self.acceptable.contains(&ANY_POLICY)
+    }
+
+    /// Refuse inputs that cannot be evaluated: too many policies, or one
+    /// that is not an OBJECT IDENTIFIER's contents.
+    pub fn validate(&self) -> Result<()> {
+        if self.acceptable.len() > MAX_ACCEPTABLE {
+            return Err(Error::new(
+                ErrorKind::InvalidConfig,
+                "too many acceptable certificate policies",
+            ));
+        }
+        for policy in self.acceptable {
+            check_oid_encoding(policy).map_err(|_| {
+                Error::new(
+                    ErrorKind::InvalidConfig,
+                    "an acceptable certificate policy is not an object identifier",
+                )
+            })?;
+        }
+        Ok(())
+    }
+}
+
+/// What policy processing established for an accepted path.
+/// `REQ-X509-090`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PolicyOutcome {
+    /// Whether a valid policy was required of this path, by the caller or
+    /// by a certificate on it.
+    pub required: bool,
+    /// Bit `i`: the caller's `acceptable[i]` is valid for the path. Zero
+    /// when the caller named no policies, and for a pinned leaf, which has
+    /// no path.
+    pub valid: u64,
+}
+
+impl PolicyOutcome {
+    /// Whether the caller's `acceptable[index]` is valid for the path.
+    pub fn is_valid(&self, index: usize) -> bool {
+        index < MAX_ACCEPTABLE && self.valid >> index & 1 == 1
+    }
+}
 
 /// The policy extensions of one certificate, as borrowed encodings.
 #[derive(Debug, Clone, Copy, Default)]
@@ -251,15 +361,15 @@ impl<'p, 'a> Walk<'p, 'a> {
         (1..=level).all(|j| self.may_assert_any(j) && self.asserts(j, ANY_POLICY))
     }
 
-    /// Whether `policy` has a node on `level` (6.1.3 (d)): the certificate
-    /// lists it and the level above has an anyPolicy node or expects it, or
-    /// the certificate asserts anyPolicy, may, and the level above expects
-    /// it.
+    /// Whether certificate `level` gives `policy` a node (6.1.3 (d)): it
+    /// lists the policy and the level above has an anyPolicy node or expects
+    /// it, or it asserts anyPolicy, may, and the level above expects it.
     ///
-    /// A policy the certificate maps where mapping is inhibited loses its
-    /// node (6.1.4 (b)). That is [`Self::expected`]'s to apply: a deleted
-    /// node differs from a kept one only in what the level below may take
-    /// from it, which is nothing.
+    /// Two effects of the certificate's mappings (6.1.4 (b)) are left to
+    /// [`Self::expected`], because they change only what the level below
+    /// may take from this one: a mapped policy loses its node where mapping
+    /// is inhibited, and gains one under an anyPolicy node where it had
+    /// none.
     fn node(&mut self, level: usize, policy: &'a [u8]) -> Result<bool> {
         self.spend()?;
         let listed = self.asserts(level, policy);
@@ -276,7 +386,8 @@ impl<'p, 'a> Walk<'p, 'a> {
     /// Whether some node on `level` expects `policy` of the level below,
     /// once the certificate's mappings have taken effect (6.1.4 (b)): a
     /// node expects its own policy unless the certificate maps it, and
-    /// then, where mapping is allowed, what it is mapped to.
+    /// then, where mapping is allowed, what it is mapped to. A mapped
+    /// policy has a node wherever the level has an anyPolicy node.
     fn expected(&mut self, level: usize, policy: &'a [u8]) -> Result<bool> {
         if level == 0 {
             return Ok(false);
@@ -286,10 +397,74 @@ impl<'p, 'a> Walk<'p, 'a> {
         }
         if self.may_map(level) {
             for (issuer, subject) in self.mappings(level) {
-                if subject == policy && self.node(level, issuer)? {
+                if subject == policy && (self.any_node(level) || self.node(level, issuer)?) {
                     return Ok(true);
                 }
             }
+        }
+        Ok(false)
+    }
+
+    /// Whether `policy` has a node on `level`, by 6.1.3 (d), whose ancestry
+    /// begins with a node of `domain`: the node below an anyPolicy node
+    /// from which it descends.
+    fn descends(&mut self, level: usize, policy: &'a [u8], domain: &[u8]) -> Result<bool> {
+        self.spend()?;
+        let listed = self.asserts(level, policy);
+        let by_any = self.may_assert_any(level) && self.asserts(level, ANY_POLICY);
+        if !listed && !by_any {
+            return Ok(false);
+        }
+        // A child of the nodes that expect it: their ancestry.
+        if self.expected_of(level - 1, policy, domain)? {
+            return Ok(true);
+        }
+        // A child of the anyPolicy node, which only a listed policy that no
+        // node expects is: its ancestry begins with itself.
+        Ok(listed
+            && policy == domain
+            && self.any_node(level - 1)
+            && !self.expected(level - 1, policy)?)
+    }
+
+    /// Whether some node on `level` with ancestry from `domain` expects
+    /// `policy` of the level below.
+    fn expected_of(&mut self, level: usize, policy: &'a [u8], domain: &[u8]) -> Result<bool> {
+        if level == 0 {
+            return Ok(false);
+        }
+        if !self.maps(level, policy) && self.descends(level, policy, domain)? {
+            return Ok(true);
+        }
+        if self.may_map(level) {
+            for (issuer, subject) in self.mappings(level) {
+                if subject != policy {
+                    continue;
+                }
+                if self.descends(level, issuer, domain)? {
+                    return Ok(true);
+                }
+                // The node a mapping creates under anyPolicy for a policy
+                // that has none: its ancestry begins with itself.
+                if issuer == domain && self.any_node(level) && !self.node(level, issuer)? {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    /// Whether the last level has a node with ancestry from `domain`
+    /// (6.1.5 (g)), when it has no anyPolicy node.
+    fn valid_for(&mut self, domain: &[u8]) -> Result<bool> {
+        let n = self.certs.len();
+        for policy in self.policies(n) {
+            if policy != ANY_POLICY && self.descends(n, policy, domain)? {
+                return Ok(true);
+            }
+        }
+        if self.may_assert_any(n) && self.asserts(n, ANY_POLICY) {
+            return self.some_expected(n - 1, &mut |walk, policy| walk.descends(n, policy, domain));
         }
         Ok(false)
     }
@@ -340,17 +515,22 @@ impl<'p, 'a> Walk<'p, 'a> {
     }
 }
 
-/// REQ-X509-088: process the certificate policies of a path (RFC 5280
-/// section 6.1) for a caller that accepts any policy and requires none at
-/// the start. `certs` are the certificates below the trust anchor, the one
-/// it issued first and the leaf last.
+/// REQ-X509-088, REQ-X509-090: process the certificate policies of a path
+/// (RFC 5280 section 6.1) for the caller's inputs. `certs` are the
+/// certificates below the trust anchor, the one it issued first and the
+/// leaf last.
 ///
-/// The path is refused when a certificate on it requires an explicit policy
-/// and, where that takes effect, no policy is valid: `certificate-usage`.
-/// Policy mappings, the inhibiting of mapping and of anyPolicy, and the
-/// exemption of self-issued certificates from the counts are all applied.
-/// A path too long or too involved to evaluate within bounds is refused.
-pub(super) fn check(certs: &[PolicyCert<'_>]) -> Result<()> {
+/// The path is refused when an explicit policy is required, by the caller
+/// or by a certificate on the path, and where that takes effect no policy
+/// the caller accepts is valid: `certificate-usage`. Policy mappings, the
+/// inhibiting of mapping and of anyPolicy, and the exemption of self-issued
+/// certificates from the counts are all applied. A path too long or too
+/// involved to evaluate within bounds is refused.
+pub(super) fn check(
+    certs: &[PolicyCert<'_>],
+    options: &PolicyOptions<'_>,
+) -> Result<PolicyOutcome> {
+    options.validate()?;
     let n = certs.len();
     if n > MAX_LEVELS {
         return Err(Error::new(
@@ -358,9 +538,12 @@ pub(super) fn check(certs: &[PolicyCert<'_>]) -> Result<()> {
             "certificate path too long for policy processing",
         ));
     }
-    // 6.1.2: each count starts beyond the path's end, which is "not set".
-    let unset = n as u64 + 1;
-    let (mut explicit, mut mapping, mut inhibit) = (unset, unset, unset);
+    // 6.1.2: each count starts beyond the path's end, which is "not set",
+    // or at zero where the caller sets it.
+    let unset = |set: bool| if set { 0 } else { n as u64 + 1 };
+    let mut explicit = unset(options.require_explicit);
+    let mut mapping = unset(options.inhibit_mapping);
+    let mut inhibit = unset(options.inhibit_any);
     let (mut any_allowed, mut mapping_allowed) = (0u64, 0u64);
     for (i, cert) in certs.iter().enumerate() {
         let last = i + 1 == n;
@@ -389,19 +572,37 @@ pub(super) fn check(certs: &[PolicyCert<'_>]) -> Result<()> {
         mapping = mapping.min(p.inhibit_mapping.unwrap_or(u64::MAX));
         inhibit = inhibit.min(p.inhibit_any.unwrap_or(u64::MAX));
     }
+    if n == 0 {
+        return Ok(PolicyOutcome::default());
+    }
     // 6.1.5 (g): a policy is required only once the count reaches zero, and
     // a count at zero stays there, so the last level decides.
-    if n == 0 || explicit > 0 {
-        return Ok(());
-    }
+    let mut outcome = PolicyOutcome {
+        required: explicit == 0,
+        valid: 0,
+    };
     let mut walk = Walk {
         certs,
         any_allowed,
         mapping_allowed,
         budget: BUDGET,
     };
-    if walk.any_node(n) || walk.some_node(n, &mut |_, _| Ok(true))? {
-        return Ok(());
+    let acceptable = if options.accepts_any() {
+        if !outcome.required {
+            return Ok(outcome);
+        }
+        walk.any_node(n) || walk.some_node(n, &mut |_, _| Ok(true))?
+    } else {
+        let any = walk.any_node(n);
+        for (i, policy) in options.acceptable.iter().enumerate() {
+            if any || walk.valid_for(policy)? {
+                outcome.valid |= 1 << i;
+            }
+        }
+        outcome.valid != 0
+    };
+    if acceptable || !outcome.required {
+        return Ok(outcome);
     }
     Err(Error::new(
         ErrorKind::CertificateUsage,
@@ -471,7 +672,29 @@ mod tests {
         }
     }
 
+    /// The caller's inputs in the abstract: the policies it accepts (none:
+    /// any) and the three initial flags.
+    #[derive(Debug, Clone, Default)]
+    struct Input {
+        acceptable: Vec<u8>,
+        require_explicit: bool,
+        inhibit_mapping: bool,
+        inhibit_any: bool,
+    }
+
     fn verdict(path: &[Spec]) -> Result<()> {
+        judge(path, &Input::default()).map(|_| ())
+    }
+
+    fn judge(path: &[Spec], input: &Input) -> Result<PolicyOutcome> {
+        let acceptable: Vec<Vec<u8>> = input.acceptable.iter().map(|id| oid(*id)).collect();
+        let acceptable: Vec<&[u8]> = acceptable.iter().map(Vec::as_slice).collect();
+        let options = PolicyOptions {
+            acceptable: &acceptable,
+            require_explicit: input.require_explicit,
+            inhibit_mapping: input.inhibit_mapping,
+            inhibit_any: input.inhibit_any,
+        };
         let encoded: Vec<Encoded> = path.iter().map(encode).collect();
         let certs: Vec<PolicyCert<'_>> = path
             .iter()
@@ -487,7 +710,7 @@ mod tests {
                 self_issued: spec.self_issued,
             })
             .collect();
-        check(&certs)
+        check(&certs, &options)
     }
 
     /// A node of RFC 5280's valid_policy_tree.
@@ -501,9 +724,15 @@ mod tests {
 
     /// RFC 5280 section 6.1 as it is written, with the tree: 6.1.2
     /// initialisation, 6.1.3 (d) to (f) and 6.1.4 (b), (h) to (j) for each
-    /// certificate, and 6.1.5 (a), (b) and (g), for a user-initial-policy-set
-    /// of anyPolicy and no initial flags. `true` when the path is accepted.
+    /// certificate, and 6.1.5 (a), (b) and (g). `None` when the path is
+    /// refused; otherwise whether a policy was required, and which of the
+    /// caller's policies the intersected tree holds on its last level, by
+    /// the policy of the node under an anyPolicy node each descends from.
     fn by_the_tree(path: &[Spec]) -> bool {
+        tree(path, &Input::default()).is_some()
+    }
+
+    fn tree(path: &[Spec], input: &Input) -> Option<PolicyOutcome> {
         let n = path.len();
         let mut nodes = vec![Node {
             depth: 0,
@@ -512,7 +741,10 @@ mod tests {
             parent: None,
             alive: true,
         }];
-        let (mut explicit, mut mapping, mut inhibit) = (n as u64 + 1, n as u64 + 1, n as u64 + 1);
+        let initial = |set: bool| if set { 0 } else { n as u64 + 1 };
+        let mut explicit = initial(input.require_explicit);
+        let mut mapping = initial(input.inhibit_mapping);
+        let mut inhibit = initial(input.inhibit_any);
         // Delete childless nodes above `depth`, until none is left.
         let prune = |nodes: &mut Vec<Node>, depth: usize| loop {
             let childless: Vec<usize> = (0..nodes.len())
@@ -589,7 +821,7 @@ mod tests {
             }
             // (f)
             if explicit == 0 && !nodes[0].alive {
-                return false;
+                return None;
             }
             if i == n {
                 break;
@@ -662,7 +894,78 @@ mod tests {
         if path[n - 1].require_explicit == Some(0) {
             explicit = 0;
         }
-        explicit > 0 || nodes[0].alive
+        let user = &input.acceptable;
+        if nodes[0].alive && !user.is_empty() {
+            // (g) (iii) 1: the nodes whose parent is an anyPolicy node.
+            let under_any: Vec<usize> = (0..nodes.len())
+                .filter(|&k| nodes[k].alive && nodes[k].parent.is_some_and(|p| nodes[p].valid == 0))
+                .collect();
+            // 2: delete those not acceptable, and all their descendants.
+            for &k in &under_any {
+                if nodes[k].valid != 0 && !user.contains(&nodes[k].valid) {
+                    nodes[k].alive = false;
+                }
+            }
+            loop {
+                let orphans: Vec<usize> = (0..nodes.len())
+                    .filter(|&k| nodes[k].alive && nodes[k].parent.is_some_and(|p| !nodes[p].alive))
+                    .collect();
+                if orphans.is_empty() {
+                    break;
+                }
+                for k in orphans {
+                    nodes[k].alive = false;
+                }
+            }
+            // 3: an anyPolicy node on the last level becomes a node for each
+            // acceptable policy not already under an anyPolicy node.
+            let any_leaves: Vec<usize> = (0..nodes.len())
+                .filter(|&k| nodes[k].alive && nodes[k].depth == n && nodes[k].valid == 0)
+                .collect();
+            for leaf in any_leaves {
+                for &policy in user {
+                    if !under_any.iter().any(|&k| nodes[k].valid == policy) {
+                        let parent = nodes[leaf].parent;
+                        nodes.push(Node {
+                            depth: n,
+                            valid: policy,
+                            expected: BTreeSet::from([policy]),
+                            parent,
+                            alive: true,
+                        });
+                    }
+                }
+                nodes[leaf].alive = false;
+            }
+            // 4.
+            prune(&mut nodes, n);
+        }
+        if explicit == 0 && !nodes[0].alive {
+            return None;
+        }
+        // Which acceptable policies the last level descends from.
+        let mut valid = 0u64;
+        if nodes[0].alive {
+            for k in (0..nodes.len()).filter(|&k| nodes[k].alive && nodes[k].depth == n) {
+                let mut top = k;
+                while let Some(parent) = nodes[top].parent
+                    && nodes[parent].valid != 0
+                {
+                    top = parent;
+                }
+                for (i, _) in user
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, u)| **u == nodes[top].valid)
+                {
+                    valid |= 1 << i;
+                }
+            }
+        }
+        Some(PolicyOutcome {
+            required: explicit == 0,
+            valid,
+        })
     }
 
     fn cert(policies: &[u8]) -> Spec {
@@ -851,9 +1154,12 @@ mod tests {
         assert!(!refused(&[top(None), bridge(&[1], &[(1, 2)])]));
     }
 
-    /// REQ-X509-088: the verdict is RFC 5280's on every path tried: 300,000
-    /// paths of one to five certificates drawn from a fixed sequence, each
-    /// judged here and by the tree as the RFC writes it.
+    /// REQ-X509-088, REQ-X509-090: the outcome is RFC 5280's on every path
+    /// tried: 300,000 paths of one to five certificates drawn from a fixed
+    /// sequence, half of them with caller's inputs drawn too, each judged
+    /// here and by the tree as the RFC writes it. Accepted or refused,
+    /// whether a policy was required, and which of the caller's policies
+    /// are valid all agree.
     #[test]
     fn the_verdict_is_the_trees_on_paths_drawn_at_random() {
         let mut state = 0x9e37_79b9_7f4a_7c15u64;
@@ -864,6 +1170,7 @@ mod tests {
             (state >> 11) % bound
         };
         let (mut accepted, mut refused_count) = (0u32, 0u32);
+        let (mut named, mut with_valid) = (0u32, 0u32);
         for _ in 0..300_000 {
             let n = 1 + next(5) as usize;
             let path: Vec<Spec> = (0..n)
@@ -894,21 +1201,199 @@ mod tests {
                     }
                 })
                 .collect();
-            let ours = verdict(&path);
-            assert_eq!(ours.is_ok(), by_the_tree(&path), "{path:?}");
+            // Half the paths are judged with RFC 5280's default inputs.
+            let input = if next(2) == 0 {
+                Input::default()
+            } else {
+                Input {
+                    acceptable: (1..=3u8).filter(|_| next(3) == 0).collect(),
+                    require_explicit: next(2) == 0,
+                    inhibit_mapping: next(4) == 0,
+                    inhibit_any: next(4) == 0,
+                }
+            };
+            if !input.acceptable.is_empty() {
+                named += 1;
+            }
+            let ours = judge(&path, &input);
+            let theirs = tree(&path, &input);
             match ours {
-                Ok(()) => accepted += 1,
+                Ok(outcome) => {
+                    assert_eq!(Some(outcome), theirs, "{path:?} {input:?}");
+                    accepted += 1;
+                    if outcome.valid != 0 {
+                        with_valid += 1;
+                    }
+                }
                 Err(e) => {
-                    assert_eq!(e.kind(), ErrorKind::CertificateUsage, "{path:?}");
+                    assert_eq!(e.kind(), ErrorKind::CertificateUsage, "{path:?} {input:?}");
+                    assert_eq!(theirs, None, "{path:?} {input:?}");
                     refused_count += 1;
                 }
             }
         }
+        assert!(
+            named > 50_000 && with_valid > 10_000,
+            "{named} {with_valid}"
+        );
         // Both verdicts are well represented, or the comparison shows little.
         assert!(
             accepted > 50_000 && refused_count > 50_000,
             "{accepted} {refused_count}"
         );
+    }
+
+    /// REQ-X509-090: the caller's inputs. Its policies are compared in the
+    /// trust anchor's domain, before any mapping; naming them requires
+    /// nothing by itself; and each initial flag acts from the first
+    /// certificate. Every outcome is also the tree's.
+    #[test]
+    fn the_callers_inputs_are_applied() {
+        let outcome = |path: &[Spec], input: &Input| {
+            let ours = judge(path, input).ok();
+            assert_eq!(ours, tree(path, input), "{path:?} {input:?}");
+            ours.map(|o| (o.required, o.valid))
+        };
+        let only = |acceptable: &[u8]| Input {
+            acceptable: acceptable.to_vec(),
+            require_explicit: true,
+            ..Input::default()
+        };
+        let plain = [cert(&[1]), cert(&[1])];
+        assert_eq!(outcome(&plain, &only(&[1])), Some((true, 0b1)));
+        assert_eq!(outcome(&plain, &only(&[2])), None);
+        assert_eq!(outcome(&plain, &only(&[2, 1])), Some((true, 0b10)));
+        assert_eq!(outcome(&plain, &only(&[1, 2, 1])), Some((true, 0b101)));
+        // Named but not required: accepted, and the report says what held.
+        let named = |acceptable: &[u8]| Input {
+            acceptable: acceptable.to_vec(),
+            ..Input::default()
+        };
+        assert_eq!(outcome(&plain, &named(&[2])), Some((false, 0)));
+        assert_eq!(outcome(&plain, &named(&[1])), Some((false, 0b1)));
+        assert_eq!(
+            outcome(&[Spec::default(), Spec::default()], &named(&[1])),
+            Some((false, 0))
+        );
+        // Required with any policy acceptable.
+        let required = Input {
+            require_explicit: true,
+            ..Input::default()
+        };
+        assert_eq!(outcome(&plain, &required), Some((true, 0)));
+        assert_eq!(outcome(&[Spec::default()], &required), None);
+        assert_eq!(outcome(&[cert(&[1]), cert(&[2])], &required), None);
+
+        // Under a mapping the caller's policy is the issuer domain's, which
+        // the leaf does not list, and not the subject domain's, which it does.
+        let mapped = [
+            Spec {
+                mappings: vec![(1, 2)],
+                ..cert(&[1])
+            },
+            cert(&[2]),
+        ];
+        assert_eq!(outcome(&mapped, &only(&[1])), Some((true, 0b1)));
+        assert_eq!(outcome(&mapped, &only(&[2])), None);
+        // A policy mapped under anyPolicy has a node of its own, and what
+        // it is mapped to descends from that.
+        let mapped_under_any = [
+            Spec {
+                mappings: vec![(3, 2)],
+                ..cert(&[0])
+            },
+            cert(&[2]),
+        ];
+        assert_eq!(outcome(&mapped_under_any, &only(&[3])), Some((true, 0b1)));
+        assert_eq!(outcome(&mapped_under_any, &only(&[2])), None);
+        assert_eq!(
+            outcome(&mapped_under_any, &only(&[2, 3])),
+            Some((true, 0b10))
+        );
+        // Without the mapping, the leaf's policy begins under anyPolicy.
+        assert_eq!(
+            outcome(&[cert(&[0]), cert(&[2])], &only(&[2])),
+            Some((true, 0b1))
+        );
+        assert_eq!(outcome(&[cert(&[0]), cert(&[2])], &only(&[1])), None);
+        // anyPolicy on the last level: every policy the caller names.
+        assert_eq!(
+            outcome(&[cert(&[0]), cert(&[0])], &only(&[1, 2])),
+            Some((true, 0b11))
+        );
+        assert_eq!(
+            outcome(&[cert(&[1, 0]), cert(&[0])], &only(&[1, 2])),
+            Some((true, 0b11))
+        );
+        // anyPolicy on the leaf alone stands for what is valid above it.
+        assert_eq!(
+            outcome(&[cert(&[1]), cert(&[0])], &only(&[1, 2])),
+            Some((true, 0b1))
+        );
+        assert_eq!(outcome(&[cert(&[1]), cert(&[0])], &only(&[2])), None);
+
+        // The initial flags.
+        let no_mapping = Input {
+            inhibit_mapping: true,
+            ..only(&[1])
+        };
+        assert_eq!(outcome(&mapped, &no_mapping), None);
+        assert_eq!(outcome(&plain, &no_mapping), Some((true, 0b1)));
+        let any_top = [cert(&[0]), cert(&[1])];
+        assert_eq!(outcome(&any_top, &only(&[1])), Some((true, 0b1)));
+        let no_any = Input {
+            inhibit_any: true,
+            ..only(&[1])
+        };
+        assert_eq!(outcome(&any_top, &no_any), None);
+        assert_eq!(outcome(&plain, &no_any), Some((true, 0b1)));
+        // A self-issued certificate may assert anyPolicy all the same.
+        let rollover = [
+            Spec {
+                self_issued: true,
+                ..cert(&[0])
+            },
+            cert(&[1]),
+        ];
+        assert_eq!(outcome(&rollover, &no_any), Some((true, 0b1)));
+    }
+
+    /// REQ-X509-090: inputs that cannot be evaluated are the caller's
+    /// error, and a caller that names anyPolicy accepts any policy.
+    #[test]
+    fn unusable_policy_inputs_are_invalid_config() {
+        let one = [cert(&[1])];
+        let certs = |path: &[Spec]| -> Vec<Encoded> { path.iter().map(encode).collect() };
+        let encoded = certs(&one);
+        let path = [PolicyCert {
+            policies: Policies {
+                policies: encoded[0].policies.as_deref(),
+                ..Policies::default()
+            },
+            self_issued: false,
+        }];
+        let p1 = oid(1);
+        let many = vec![p1.as_slice(); MAX_ACCEPTABLE + 1];
+        let e = check(&path, &PolicyOptions::require(&many)).unwrap_err();
+        assert_eq!(e.kind(), ErrorKind::InvalidConfig);
+        let full = &many[..MAX_ACCEPTABLE];
+        let outcome = check(&path, &PolicyOptions::require(full)).unwrap();
+        assert_eq!(outcome.valid, u64::MAX);
+        assert!(outcome.is_valid(0) && outcome.is_valid(63) && !outcome.is_valid(64));
+        for not_an_oid in [&[][..], &[0x80, 0x01], &[0x2a, 0x81]] {
+            let list = [p1.as_slice(), not_an_oid];
+            let e = check(&path, &PolicyOptions::require(&list)).unwrap_err();
+            assert_eq!(e.kind(), ErrorKind::InvalidConfig, "{not_an_oid:?}");
+        }
+        // anyPolicy among the caller's policies is any policy: nothing is
+        // reported valid by name, and a policy the caller did not name does.
+        let p2 = oid(2);
+        let with_any = [p2.as_slice(), ANY_POLICY];
+        let outcome = check(&path, &PolicyOptions::require(&with_any)).unwrap();
+        assert_eq!((outcome.required, outcome.valid), (true, 0));
+        let without = [p2.as_slice()];
+        check(&path, &PolicyOptions::require(&without)).unwrap_err();
+        assert_eq!(PolicyOptions::any(), PolicyOptions::default());
     }
 
     /// REQ-X509-088: the work is bounded. Mappings that fan in at every
@@ -943,6 +1428,6 @@ mod tests {
         verdict(&long).unwrap();
         let e = verdict(&vec![Spec::default(); MAX_LEVELS + 1]).unwrap_err();
         assert_eq!(e.kind(), ErrorKind::CapacityExceeded);
-        check(&[]).unwrap();
+        check(&[], &PolicyOptions::any()).unwrap();
     }
 }

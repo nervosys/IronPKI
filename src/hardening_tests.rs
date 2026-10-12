@@ -1043,6 +1043,16 @@ fn inhibit_any_policy(count: u8) -> Vec<u8> {
 /// extra extensions: the first is the certificate the root issued, the last
 /// the leaf. The root carries `root_extra`.
 fn policy_path(root_extra: &[Vec<u8>], levels: &[&[Vec<u8>]]) -> Option<ErrorKind> {
+    policy_outcome(root_extra, levels, &x509::PolicyOptions::any()).err()
+}
+
+/// The same, for a caller's policy inputs: what both validators report of
+/// policies, or the kind of error both give.
+fn policy_outcome(
+    root_extra: &[Vec<u8>],
+    levels: &[&[Vec<u8>]],
+    options: &x509::PolicyOptions<'_>,
+) -> Result<x509::PolicyOutcome, ErrorKind> {
     let mut signer = key();
     let mut exts = vec![basic_constraints(true), key_usage(true)];
     exts.extend_from_slice(root_extra);
@@ -1067,9 +1077,132 @@ fn policy_path(root_extra: &[Vec<u8>], levels: &[&[Vec<u8>]]) -> Option<ErrorKin
     }
     let leaf = certs.pop().unwrap();
     let ints: Vec<&[u8]> = certs.iter().map(Vec::as_slice).collect();
-    let (owned, fixed) = verdicts(&leaf, &ints, &roots);
+    let mut o = opts();
+    o.policy = *options;
+    let owned = x509::verify_chain(&leaf, &ints, &roots, &o)
+        .map(|r| r.policy)
+        .map_err(|e| e.kind());
+    let fixed = x509::verify_chain_fixed(&leaf, &ints, &roots, &o)
+        .map(|r| r.policy)
+        .map_err(|e| e.kind());
     assert_eq!(owned, fixed, "the two validators disagree");
     owned
+}
+
+/// REQ-X509-090: both validators take the caller's policy inputs and
+/// report what held: whether a policy was required, and which of the
+/// caller's policies are valid for the path, compared in the trust anchor's
+/// domain. Unusable inputs are refused before anything is parsed, and a
+/// pinned leaf, which has no path, has no policies processed.
+#[test]
+fn the_callers_policy_inputs_reach_both_validators() {
+    use x509::PolicyOptions;
+    let p = |policies: &[&[u8]]| certificate_policies(policies);
+    let valid = |r: Result<x509::PolicyOutcome, ErrorKind>| r.map(|o| (o.required, o.valid));
+    let plain: [&[Vec<u8>]; 2] = [&[p(&[POLICY_1])], &[p(&[POLICY_1])]];
+    // The defaults: nothing required, nothing reported.
+    assert_eq!(
+        valid(policy_outcome(&[], &plain, &PolicyOptions::any())),
+        Ok((false, 0))
+    );
+    assert_eq!(
+        valid(policy_outcome(
+            &[],
+            &plain,
+            &PolicyOptions::require(&[POLICY_1])
+        )),
+        Ok((true, 0b1))
+    );
+    assert_eq!(
+        valid(policy_outcome(
+            &[],
+            &plain,
+            &PolicyOptions::require(&[POLICY_2, POLICY_1])
+        )),
+        Ok((true, 0b10))
+    );
+    assert_eq!(
+        policy_outcome(&[], &plain, &PolicyOptions::require(&[POLICY_2])),
+        Err(ErrorKind::CertificateUsage)
+    );
+    // Named without being required.
+    let mut named = PolicyOptions::any();
+    named.acceptable = &[POLICY_2, POLICY_1];
+    assert_eq!(
+        valid(policy_outcome(&[], &plain, &named)),
+        Ok((false, 0b10))
+    );
+    // Required of a path with no policies at all.
+    assert_eq!(
+        policy_outcome(&[], &[&[], &[]], &PolicyOptions::require(&[])),
+        Err(ErrorKind::CertificateUsage)
+    );
+    // Under a mapping, the caller's policy is the one the anchor's domain
+    // knows, not the one the leaf lists.
+    let mapped: [&[Vec<u8>]; 2] = [
+        &[p(&[POLICY_1]), policy_mappings(&[(POLICY_1, POLICY_2)])],
+        &[p(&[POLICY_2])],
+    ];
+    assert_eq!(
+        valid(policy_outcome(
+            &[],
+            &mapped,
+            &PolicyOptions::require(&[POLICY_1])
+        )),
+        Ok((true, 0b1))
+    );
+    assert_eq!(
+        policy_outcome(&[], &mapped, &PolicyOptions::require(&[POLICY_2])),
+        Err(ErrorKind::CertificateUsage)
+    );
+    let mut no_mapping = PolicyOptions::require(&[POLICY_1]);
+    no_mapping.inhibit_mapping = true;
+    assert_eq!(
+        policy_outcome(&[], &mapped, &no_mapping),
+        Err(ErrorKind::CertificateUsage)
+    );
+    let any_top: [&[Vec<u8>]; 2] = [&[p(&[ANY_POLICY])], &[p(&[POLICY_1])]];
+    let mut no_any = PolicyOptions::require(&[POLICY_1]);
+    assert_eq!(
+        valid(policy_outcome(&[], &any_top, &no_any)),
+        Ok((true, 0b1))
+    );
+    no_any.inhibit_any = true;
+    assert_eq!(
+        policy_outcome(&[], &any_top, &no_any),
+        Err(ErrorKind::CertificateUsage)
+    );
+
+    // Unusable inputs.
+    let many = [POLICY_1; x509::MAX_ACCEPTABLE + 1];
+    assert_eq!(
+        policy_outcome(&[], &plain, &PolicyOptions::require(&many)),
+        Err(ErrorKind::InvalidConfig)
+    );
+    assert_eq!(
+        policy_outcome(&[], &plain, &PolicyOptions::require(&[&[0x80, 0x01]])),
+        Err(ErrorKind::InvalidConfig)
+    );
+
+    // A pinned leaf has no path: nothing is processed, whatever is asked.
+    let signer = key();
+    let leaf = cert(
+        1,
+        &name("Pinned"),
+        &name("Pinned"),
+        signer.spki(),
+        &[basic_constraints(false), key_usage(false)],
+        &signer,
+    );
+    let mut roots = RootStore::new();
+    roots.add_der(&leaf).unwrap();
+    let mut o = opts();
+    o.policy = PolicyOptions::require(&[POLICY_1]);
+    let owned = x509::verify_chain(&leaf, &[], &roots, &o).unwrap();
+    let fixed = x509::verify_chain_fixed(&leaf, &[], &roots, &o).unwrap();
+    assert_eq!(owned.depth, 0);
+    assert_eq!(owned.policy, x509::PolicyOutcome::default());
+    assert_eq!(fixed.policy, x509::PolicyOutcome::default());
 }
 
 /// REQ-X509-088: both validators process certificate policies. A path is

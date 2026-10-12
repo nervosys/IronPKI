@@ -7,7 +7,7 @@ that reads bytes it did not make. This package is its own workspace, so
 | Target | What it reaches |
 |---|---|
 | `pki` | The certificate parser and its accessors, name matching, both path validators (the input as a leaf and as an intermediate), CRLs, OCSP responses, and trust anchors in both forms, including a key-form anchor's name constraints. It runs under each `Purpose` and with leaf pinning on and off, and fails if the two validators disagree |
-| `pki_differential` | The two path validators on a chain whose to-be-signed bytes the fuzzer mutates and the harness signs again, so every signature verifies and every later check runs. It fails if they disagree, down to the error kind |
+| `pki_differential` | The two path validators on a chain whose to-be-signed bytes the fuzzer mutates and the harness signs again, so every signature verifies and every later check runs. It runs under each purpose and with the caller's policy inputs varied, and fails if they disagree, down to the error kind and to what they report of policies |
 
 ## Deterministic by construction
 
@@ -47,16 +47,16 @@ A crash input becomes a regression test in `src/` alongside the fix.
 ## Results so far
 
 Windows 11, nightly, AddressSanitizer, on a loaded machine, 2026-10-10, at
-IronPKI 0.1.2 plus certificate policy processing, with URI and
-directory-name constraints, names of both forms and every policy extension
-in the differential fixtures. No crashes, no sanitizer reports and no
+IronPKI 0.2.0 before its release, with URI and directory-name
+constraints, names of both forms and every policy extension in the
+differential fixtures, and the caller's policy inputs varied. No crashes, no sanitizer reports and no
 disagreement between the validators (leak detection is not available with
 ASan on Windows):
 
 | Target | Runs | Time |
 |---|---:|---:|
-| `pki` | 546,024 | 301 s |
-| `pki_differential` | 641,750 | 301 s |
+| `pki` | 658,801 | 301 s |
+| `pki_differential` | 596,268 | 301 s |
 
 These are short runs. 0.1.2's own change to the validator was fuzzed only
 after it was published (three minutes a target, without a finding). The

@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.2.0 (not released)
+
+A caller can say which certificate policies it accepts. One breaking
+change: `VerifyOptions`, `ChainReport` and `FixedChainReport` can no
+longer be built or matched field by field outside this crate.
+
+### Added
+- `VerifyOptions::policy`, a `PolicyOptions` (REQ-X509-090): the inputs of
+  RFC 5280 section 6.1.1. `acceptable` names up to 64 policies the caller
+  accepts, by the contents of their identifiers; `require_explicit`
+  requires a valid policy from the start of the path; `inhibit_mapping`
+  and `inhibit_any` inhibit policy mapping and anyPolicy from the start.
+  `VerifyOptions::new` sets `PolicyOptions::any()`, RFC 5280's defaults,
+  under which nothing changes from 0.1.3.
+- `PolicyOptions::require(&[..])`, for a caller that means "only these
+  policies". Naming policies requires none by itself, as the RFC has it: a
+  path without policies is still accepted unless one is required.
+- `ChainReport::policy` and `FixedChainReport::policy`, a `PolicyOutcome`:
+  whether a policy was required of the path, and which of the caller's
+  policies are valid for it, one bit for each.
+- The caller's policies are compared in the trust anchor's own domain
+  (RFC 5280 section 6.1.5 (g)): under a policy mapping, the policy to name
+  is the one the anchor's side knows, not the one the leaf lists.
+
+### Changed
+- `VerifyOptions`, `ChainReport` and `FixedChainReport` are
+  `#[non_exhaustive]`, so that a field can be added without breaking
+  callers again. Build options with `VerifyOptions::new` and set fields
+  after; read reports by field.
+- Policy inputs that cannot be evaluated are `invalid-config`, before
+  anything is parsed: more than 64 policies, or one that is not an object
+  identifier's contents.
+
+### Verification
+- The reference in the tests, RFC 5280's policy tree written out, gains
+  the caller's inputs and the intersection of section 6.1.5 (g). The
+  comparison over 300,000 paths draws inputs for half of them and compares
+  the whole outcome: accepted or refused, whether a policy was required,
+  and which of the caller's policies are valid.
+- 20 more OpenSSL-issued paths are judged with a caller's inputs, given to
+  OpenSSL as `-policy`, `-explicit_policy`, `-inhibit_map` and
+  `-inhibit_any`: 46 in all, the same verdict from OpenSSL and from both
+  validators on each.
+
 ## 0.1.3 (2026-10-11)
 
 Certificate policies are processed, the CNSA profiles' key rule covers

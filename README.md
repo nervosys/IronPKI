@@ -42,10 +42,10 @@ checked against certificates made with PyCA `cryptography`.
 Done: `TrustAnchor` and `Limits` in the validator's interface; a report that
 names its anchor by subject and key; pinning a leaf as an explicit option.
 Done: a traceability matrix, [docs/TRACEABILITY.md](docs/TRACEABILITY.md), of
-153 requirements and the tests that verify them, enforced by a test.
+154 requirements and the tests that verify them, enforced by a test.
 Done: name constraints evaluated for rfc822Name, directoryName and URI names
-as well as DNS names and addresses; certificate policies processed for RFC
-5280's default inputs; IronSocketLayer 0.4.0 depends on this crate in place
+as well as DNS names and addresses; certificate policies processed, with the
+caller's own policy inputs; IronSocketLayer 0.4.0 depends on this crate in place
 of its own copy.
 Next: IronPrivacyGuard does the same.
 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) lists what it needs before it

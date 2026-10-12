@@ -123,7 +123,8 @@ fn main() {
         .expect("the endorsement-key fixture validates");
     x509::verify_chain_fixed(&ek_leaf, &[&int], &d.roots, &ek_opts)
         .expect("the endorsement-key fixture validates in fixed slots");
-    for sel in 0..8 {
+    // And each again with two of the fixtures' policies named and required.
+    for sel in (0..8).chain((0..8).map(|sel| sel | 0x18)) {
         write(
             "pki_differential",
             &format!("chain-{sel}"),
@@ -136,7 +137,7 @@ fn main() {
         );
     }
     println!(
-        "wrote {} pki seeds and 16 pki_differential seeds",
+        "wrote {} pki seeds and 32 pki_differential seeds",
         9 + 2 * n
     );
 }

@@ -1053,8 +1053,12 @@ fn name_constraints_are_judged_as_openssl_judges_them() {
 /// certificates below the root, the one it issued first and the leaf last.
 /// REQ-X509-088.
 ///
-/// OpenSSL is told `-policy anyPolicy`, which is RFC 5280's default
-/// user-initial-policy-set and the one this crate uses. With
+/// The second list gives the caller's inputs as OpenSSL's options
+/// (`-policy`, `-explicit_policy`, `-inhibit_map`, `-inhibit_any`), and the
+/// same inputs go to this crate as `PolicyOptions`. REQ-X509-090.
+///
+/// Where no policy is named OpenSSL is told `-policy anyPolicy`, which is
+/// RFC 5280's default user-initial-policy-set and this crate's. With
 /// `-policy_check` alone its acceptable set is empty, and it refuses every
 /// path on which an explicit policy is required.
 #[test]
@@ -1192,11 +1196,87 @@ fn certificate_policies_are_judged_as_openssl_judges_them() {
             true,
         ),
     ];
+    const ONLY_1: &[&str] = &["-policy", "1.2.3.1", "-explicit_policy"];
+    const ONLY_2: &[&str] = &["-policy", "1.2.3.2", "-explicit_policy"];
+    const ONLY_3: &[&str] = &["-policy", "1.2.3.3", "-explicit_policy"];
+    const ANY_MAPS_3: &str =
+        "certificatePolicies=anyPolicy\npolicyMappings=critical,1.2.3.3:1.2.3.2";
+    let with_inputs: &[(&[&str], &[&str], bool)] = &[
+        // The caller's policies, required.
+        (&[P1, P1], ONLY_1, true),
+        (&[P1, P1], ONLY_2, false),
+        (
+            &[P1, P1],
+            &[
+                "-policy",
+                "1.2.3.2",
+                "-policy",
+                "1.2.3.1",
+                "-explicit_policy",
+            ],
+            true,
+        ),
+        // Named, and nothing requires one.
+        (&[P1, P1], &["-policy", "1.2.3.2"], true),
+        // Named, and a certificate requires one.
+        (&[CA, P1], &["-policy", "1.2.3.2"], false),
+        (&[CA, P1], &["-policy", "1.2.3.1"], true),
+        // Required, with any policy acceptable.
+        (&[P1, P1], &["-explicit_policy"], true),
+        (&["", ""], &["-explicit_policy"], false),
+        (&[P1, P2], &["-explicit_policy"], false),
+        // Under a mapping the caller's policy is the issuer domain's.
+        (&[BRIDGE, P2], ONLY_1, true),
+        (&[BRIDGE, P2], ONLY_2, false),
+        (
+            &[BRIDGE, P2],
+            &["-policy", "1.2.3.1", "-explicit_policy", "-inhibit_map"],
+            false,
+        ),
+        (&[ANY_MAPS_3, P2], ONLY_3, true),
+        (&[ANY_MAPS_3, P2], ONLY_2, false),
+        // anyPolicy, and anyPolicy inhibited from the start.
+        (&[ANY, P1], ONLY_1, true),
+        (&[ANY, P1], ONLY_2, false),
+        (
+            &[ANY, P1],
+            &["-policy", "1.2.3.1", "-explicit_policy", "-inhibit_any"],
+            false,
+        ),
+        (&[ANY, ANY], ONLY_2, true),
+        (&[P1, ANY], ONLY_1, true),
+        (&[P1, ANY], ONLY_2, false),
+    ];
+    let all: Vec<(&[&str], &[&str], bool)> = cases
+        .iter()
+        .map(|(levels, expected)| (*levels, &[][..], *expected))
+        .chain(with_inputs.iter().copied())
+        .collect();
     let ec = ["-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256"];
     let base = ["req", "-x509", "-nodes", "-days", "2", "-config", "p.cnf"];
-    for (n, (levels, expected)) in cases.iter().enumerate() {
+    for (n, (levels, inputs, expected)) in all.iter().enumerate() {
         let dir = workdir(&format!("policy-{n}"));
-        let what = format!("case {n}: {levels:?}");
+        let what = format!("case {n}: {levels:?} {inputs:?}");
+        // The same inputs for this crate.
+        let named: Vec<&[u8]> = inputs
+            .iter()
+            .filter_map(|flag| match *flag {
+                "1.2.3.1" => Some(&[0x2a, 0x03, 0x01][..]),
+                "1.2.3.2" => Some(&[0x2a, 0x03, 0x02][..]),
+                "1.2.3.3" => Some(&[0x2a, 0x03, 0x03][..]),
+                _ => None,
+            })
+            .collect();
+        let mut policy = ironpki::x509::PolicyOptions::any();
+        policy.acceptable = &named;
+        policy.require_explicit = inputs.contains(&"-explicit_policy");
+        policy.inhibit_mapping = inputs.contains(&"-inhibit_map");
+        policy.inhibit_any = inputs.contains(&"-inhibit_any");
+        let any_policy: &[&str] = if named.is_empty() {
+            &["-policy", "anyPolicy"]
+        } else {
+            &[]
+        };
         let mut config = String::from(
             "[req]\ndistinguished_name=dn\n[dn]\n\
              [l0]\nbasicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign\n",
@@ -1263,16 +1343,18 @@ fn certificate_policies_are_judged_as_openssl_judges_them() {
         let leaf_file = format!("c{}.pem", levels.len());
         let (theirs, text) = openssl(
             &[
-                "verify",
-                "-x509_strict",
-                "-policy",
-                "anyPolicy",
-                "-CAfile",
-                "c0.pem",
-                "-untrusted",
-                "untrusted.pem",
-                &leaf_file,
-            ],
+                &["verify", "-x509_strict"][..],
+                any_policy,
+                inputs,
+                &[
+                    "-CAfile",
+                    "c0.pem",
+                    "-untrusted",
+                    "untrusted.pem",
+                    &leaf_file,
+                ],
+            ]
+            .concat(),
             &dir,
         );
         let mut roots = RootStore::new();
@@ -1282,12 +1364,13 @@ fn certificate_policies_are_judged_as_openssl_judges_them() {
             .collect();
         let ints: Vec<&[u8]> = ints.iter().map(Vec::as_slice).collect();
         let leaf = read_cert(&dir, &leaf_file);
-        let opts = VerifyOptions::new(
+        let mut opts = VerifyOptions::new(
             now(),
             Purpose::TlsServer,
             VERIFY_ALGORITHMS,
             Limits::DEFAULT,
         );
+        opts.policy = policy;
         let owned = verify_chain(&leaf, &ints, &roots, &opts);
         let fixed = verify_chain_fixed(&leaf, &ints, &roots, &opts);
         assert_eq!(
