@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.1.4 (not released)
+
+0.2.1's fixes to certificate policy processing, for those who stay on
+0.1: IronSocketLayer 0.4 depends on this line. Neither defect accepted a
+path it should not have. No API change.
+
+### Fixed
+- Paths RFC 5280 accepts could be refused as too involved: the work was
+  counted in evaluations, 8,192 to a path, and a certificate requiring an
+  explicit policy above certificates of many policies could need more. It
+  is now counted by list entries examined, a million to a path. A path
+  whose mappings fan in at level after level can still exhaust it and be
+  refused.
+- The bound did not bound the time: scans for anyPolicy were not counted,
+  and a certificate could list one policy 256 times, so a chain under a
+  trusted anchor could make one evaluation take 170 ms at the default path
+  length. Whether a level has an anyPolicy node is now worked out once for
+  the path and every scan is counted by its length.
+
+### Changed
+- A certificate that lists a policy twice no longer parses (RFC 5280
+  section 4.2.1.4), and neither does one whose policy qualifiers are not
+  each an identifier and one value (REQ-X509-089).
+
+### Verification
+- Found in 0.2.0 by a second reading of the policy module against RFC
+  5280's text by another instance of the model that wrote it; it is not an
+  independent review. The same changes as 0.2.1, applied to 0.1.3's
+  module, which has no caller-named policies.
+- The comparison with the policy tree in the tests draws wider paths: up
+  to eight certificates over six policies, lists in any order, mappings
+  that repeat and fan in. 400,000 paths agree; fewer than one in ten
+  thousand exhaust the budget and are not compared.
+- A valid path that needs more than 0.1.3's bound is a test, and a plain
+  path's cost is pinned to the step.
+
 ## 0.1.3 (2026-10-11)
 
 Certificate policies are processed, the CNSA profiles' key rule covers

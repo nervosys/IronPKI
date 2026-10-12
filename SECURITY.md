@@ -59,9 +59,15 @@ So that nothing is assumed:
   5280's defaults: any policy is acceptable and none is required at the
   start. A path is refused when a certificate on it requires an explicit
   policy and none is valid. A caller cannot name the policies it accepts,
-  require one itself, or learn which were valid; policy qualifiers are not
-  examined. A path whose policies take more than a fixed amount of work to
-  evaluate is refused.
+  require one itself, or learn which were valid (0.2 can); policy
+  qualifiers are not examined. A path whose policies take more than a
+  fixed amount of work to evaluate is refused: a million list entries
+  examined. Nothing is remembered between the questions asked of a path,
+  so one whose policy mappings fan in at level after level can exhaust
+  that although RFC 5280 would accept it.
+- A certificate counts as self-issued, for the policy counts that exempt
+  one, when its issuer and subject are the same bytes, not by the name
+  comparison of RFC 5280 section 7.1; this errs towards refusal.
 - Name constraints are evaluated for dNSName, iPAddress, rfc822Name,
   directoryName and uniformResourceIdentifier. Any other form in a
   constraint fails the path closed.
