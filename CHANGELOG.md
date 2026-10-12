@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0 (not released)
+## 0.3.0 (2026-10-12)
 
 URI alternative names, read and issued, and PKCS#10 certificate requests,
 read and made. One breaking change: `CertificateParams` can no longer be
