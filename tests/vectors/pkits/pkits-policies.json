@@ -1,0 +1,1414 @@
+{
+ "cases": [
+  {
+   "name": "4.8.1 All Certificates Same Policy Test1 (Subpart 1)",
+   "number": "4.8.1",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "GoodCACert",
+    "ValidCertificatePathTest1EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": true,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.8.1 All Certificates Same Policy Test1 (Subpart 2)",
+   "number": "4.8.1",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "GoodCACert",
+    "ValidCertificatePathTest1EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "NIST-test-policy-1",
+   "initial_explicit_policy": true,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.8.1 All Certificates Same Policy Test1 (Subpart 3)",
+   "number": "4.8.1",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "GoodCACert",
+    "ValidCertificatePathTest1EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "NIST-test-policy-2",
+   "initial_explicit_policy": true,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.8.1 All Certificates Same Policy Test1 (Subpart 4)",
+   "number": "4.8.1",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "GoodCACert",
+    "ValidCertificatePathTest1EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "NIST-test-policy-1,NIST-test-policy-2",
+   "initial_explicit_policy": true,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.8.2 All Certificates No Policies Test2 (Subpart 1)",
+   "number": "4.8.2",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "NoPoliciesCACert",
+    "AllCertificatesNoPoliciesTest2EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.8.2 All Certificates No Policies Test2 (Subpart 2)",
+   "number": "4.8.2",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "NoPoliciesCACert",
+    "AllCertificatesNoPoliciesTest2EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": true,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.8.3 Different Policies Test3 (Subpart 1)",
+   "number": "4.8.3",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "GoodCACert",
+    "PoliciesP2subCACert",
+    "DifferentPoliciesTest3EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.8.3 Different Policies Test3 (Subpart 2)",
+   "number": "4.8.3",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "GoodCACert",
+    "PoliciesP2subCACert",
+    "DifferentPoliciesTest3EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": true,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.8.3 Different Policies Test3 (Subpart 3)",
+   "number": "4.8.3",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "GoodCACert",
+    "PoliciesP2subCACert",
+    "DifferentPoliciesTest3EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "NIST-test-policy-1,NIST-test-policy-2",
+   "initial_explicit_policy": true,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.8.4 Different Policies Test4",
+   "number": "4.8.4",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "GoodCACert",
+    "GoodsubCACert",
+    "DifferentPoliciesTest4EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.8.5 Different Policies Test5",
+   "number": "4.8.5",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "GoodCACert",
+    "PoliciesP2subCA2Cert",
+    "DifferentPoliciesTest5EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.8.6 Overlapping Policies Test6 (Subpart 1)",
+   "number": "4.8.6",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "PoliciesP1234CACert",
+    "PoliciesP1234subCAP123Cert",
+    "PoliciesP1234subsubCAP123P12Cert",
+    "OverlappingPoliciesTest6EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.8.6 Overlapping Policies Test6 (Subpart 2)",
+   "number": "4.8.6",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "PoliciesP1234CACert",
+    "PoliciesP1234subCAP123Cert",
+    "PoliciesP1234subsubCAP123P12Cert",
+    "OverlappingPoliciesTest6EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "NIST-test-policy-1",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.8.6 Overlapping Policies Test6 (Subpart 3)",
+   "number": "4.8.6",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "PoliciesP1234CACert",
+    "PoliciesP1234subCAP123Cert",
+    "PoliciesP1234subsubCAP123P12Cert",
+    "OverlappingPoliciesTest6EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "NIST-test-policy-2",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.8.7 Different Policies Test7",
+   "number": "4.8.7",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "PoliciesP123CACert",
+    "PoliciesP123subCAP12Cert",
+    "PoliciesP123subsubCAP12P1Cert",
+    "DifferentPoliciesTest7EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.8.8 Different Policies Test8",
+   "number": "4.8.8",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "PoliciesP12CACert",
+    "PoliciesP12subCAP1Cert",
+    "PoliciesP12subsubCAP1P2Cert",
+    "DifferentPoliciesTest8EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.8.9 Different Policies Test9",
+   "number": "4.8.9",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "PoliciesP123CACert",
+    "PoliciesP123subCAP12Cert",
+    "PoliciesP123subsubCAP12P2Cert",
+    "PoliciesP123subsubsubCAP12P2P1Cert",
+    "DifferentPoliciesTest9EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.8.10 All Certificates Same Policies Test10 (Subpart 1)",
+   "number": "4.8.10",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "PoliciesP12CACert",
+    "AllCertificatesSamePoliciesTest10EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1,NIST-test-policy-2"
+  },
+  {
+   "name": "4.8.10 All Certificates Same Policies Test10 (Subpart 2)",
+   "number": "4.8.10",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "PoliciesP12CACert",
+    "AllCertificatesSamePoliciesTest10EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "NIST-test-policy-1",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.8.10 All Certificates Same Policies Test10 (Subpart 3)",
+   "number": "4.8.10",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "PoliciesP12CACert",
+    "AllCertificatesSamePoliciesTest10EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "NIST-test-policy-2",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-2"
+  },
+  {
+   "name": "4.8.11 All Certificates AnyPolicy Test11 (Subpart 1)",
+   "number": "4.8.11",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "anyPolicyCACert",
+    "AllCertificatesanyPolicyTest11EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "anyPolicy"
+  },
+  {
+   "name": "4.8.11 All Certificates AnyPolicy Test11 (Subpart 2)",
+   "number": "4.8.11",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "anyPolicyCACert",
+    "AllCertificatesanyPolicyTest11EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "NIST-test-policy-1",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.8.12 Different Policies Test12",
+   "number": "4.8.12",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "PoliciesP3CACert",
+    "DifferentPoliciesTest12EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.8.13 All Certificates Same Policies Test13 (Subpart 1)",
+   "number": "4.8.13",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "PoliciesP123CACert",
+    "AllCertificatesSamePoliciesTest13EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "NIST-test-policy-1",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.8.13 All Certificates Same Policies Test13 (Subpart 2)",
+   "number": "4.8.13",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "PoliciesP123CACert",
+    "AllCertificatesSamePoliciesTest13EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "NIST-test-policy-2",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-2"
+  },
+  {
+   "name": "4.8.13 All Certificates Same Policies Test13 (Subpart 3)",
+   "number": "4.8.13",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "PoliciesP123CACert",
+    "AllCertificatesSamePoliciesTest13EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "NIST-test-policy-3",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-3"
+  },
+  {
+   "name": "4.8.14 AnyPolicy Test14 (Subpart 1)",
+   "number": "4.8.14",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "anyPolicyCACert",
+    "AnyPolicyTest14EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "NIST-test-policy-1",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.8.14 AnyPolicy Test14 (Subpart 2)",
+   "number": "4.8.14",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "anyPolicyCACert",
+    "AnyPolicyTest14EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "NIST-test-policy-2",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.8.15 User Notice Qualifier Test15",
+   "number": "4.8.15",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "UserNoticeQualifierTest15EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.8.16 User Notice Qualifier Test16",
+   "number": "4.8.16",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "GoodCACert",
+    "UserNoticeQualifierTest16EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.8.17 User Notice Qualifier Test17",
+   "number": "4.8.17",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "GoodCACert",
+    "UserNoticeQualifierTest17EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.8.18 User Notice Qualifier Test18 (Subpart 1)",
+   "number": "4.8.18",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "PoliciesP12CACert",
+    "UserNoticeQualifierTest18EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "NIST-test-policy-1",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.8.18 User Notice Qualifier Test18 (Subpart 2)",
+   "number": "4.8.18",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "PoliciesP12CACert",
+    "UserNoticeQualifierTest18EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "NIST-test-policy-2",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-2"
+  },
+  {
+   "name": "4.8.19 User Notice Qualifier Test19",
+   "number": "4.8.19",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "UserNoticeQualifierTest19EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.8.20 CPS Pointer Qualifier Test20",
+   "number": "4.8.20",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "GoodCACert",
+    "CPSPointerQualifierTest20EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "NIST-test-policy-1",
+   "initial_explicit_policy": true,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.9.1 Valid RequireExplicitPolicy Test1",
+   "number": "4.9.1",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "requireExplicitPolicy10CACert",
+    "requireExplicitPolicy10subCACert",
+    "requireExplicitPolicy10subsubCACert",
+    "requireExplicitPolicy10subsubsubCACert",
+    "ValidrequireExplicitPolicyTest1EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.9.2 Valid RequireExplicitPolicy Test2",
+   "number": "4.9.2",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "requireExplicitPolicy5CACert",
+    "requireExplicitPolicy5subCACert",
+    "requireExplicitPolicy5subsubCACert",
+    "requireExplicitPolicy5subsubsubCACert",
+    "ValidrequireExplicitPolicyTest2EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.9.3 Invalid RequireExplicitPolicy Test3",
+   "number": "4.9.3",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "requireExplicitPolicy4CACert",
+    "requireExplicitPolicy4subCACert",
+    "requireExplicitPolicy4subsubCACert",
+    "requireExplicitPolicy4subsubsubCACert",
+    "InvalidrequireExplicitPolicyTest3EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.9.4 Valid RequireExplicitPolicy Test4",
+   "number": "4.9.4",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "requireExplicitPolicy0CACert",
+    "requireExplicitPolicy0subCACert",
+    "requireExplicitPolicy0subsubCACert",
+    "requireExplicitPolicy0subsubsubCACert",
+    "ValidrequireExplicitPolicyTest4EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.9.5 Invalid RequireExplicitPolicy Test5",
+   "number": "4.9.5",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "requireExplicitPolicy7CACert",
+    "requireExplicitPolicy7subCARE2Cert",
+    "requireExplicitPolicy7subsubCARE2RE4Cert",
+    "requireExplicitPolicy7subsubsubCARE2RE4Cert",
+    "InvalidrequireExplicitPolicyTest5EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.9.6 Valid Self-Issued requireExplicitPolicy Test6",
+   "number": "4.9.6",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "requireExplicitPolicy2CACert",
+    "requireExplicitPolicy2SelfIssuedCACert",
+    "ValidSelfIssuedrequireExplicitPolicyTest6EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.9.7 Invalid Self-Issued requireExplicitPolicy Test7",
+   "number": "4.9.7",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "requireExplicitPolicy2CACert",
+    "requireExplicitPolicy2SelfIssuedCACert",
+    "requireExplicitPolicy2subCACert",
+    "InvalidSelfIssuedrequireExplicitPolicyTest7EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.9.8 Invalid Self-Issued requireExplicitPolicy Test8",
+   "number": "4.9.8",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "requireExplicitPolicy2CACert",
+    "requireExplicitPolicy2SelfIssuedCACert",
+    "requireExplicitPolicy2subCACert",
+    "requireExplicitPolicy2SelfIssuedsubCACert",
+    "InvalidSelfIssuedrequireExplicitPolicyTest8EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.10.1 Valid Policy Mapping Test1 (Subpart 1)",
+   "number": "4.10.1.1",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "Mapping1to2CACert",
+    "ValidPolicyMappingTest1EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "NIST-test-policy-1",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.10.1 Valid Policy Mapping Test1 (Subpart 2)",
+   "number": "4.10.1.2",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "Mapping1to2CACert",
+    "ValidPolicyMappingTest1EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "NIST-test-policy-2",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.10.1 Valid Policy Mapping Test1 (Subpart 3)",
+   "number": "4.10.1.3",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "Mapping1to2CACert",
+    "ValidPolicyMappingTest1EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": true,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.10.2 Invalid Policy Mapping Test2 (Subpart 1)",
+   "number": "4.10.2",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "Mapping1to2CACert",
+    "InvalidPolicyMappingTest2EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.10.2 Invalid Policy Mapping Test2 (Subpart 2)",
+   "number": "4.10.2",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "Mapping1to2CACert",
+    "InvalidPolicyMappingTest2EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": true,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.10.3 Valid Policy Mapping Test3 (Subpart 1)",
+   "number": "4.10.3",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "P12Mapping1to3CACert",
+    "P12Mapping1to3subCACert",
+    "P12Mapping1to3subsubCACert",
+    "ValidPolicyMappingTest3EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "NIST-test-policy-1",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.10.3 Valid Policy Mapping Test3 (Subpart 2)",
+   "number": "4.10.3",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "P12Mapping1to3CACert",
+    "P12Mapping1to3subCACert",
+    "P12Mapping1to3subsubCACert",
+    "ValidPolicyMappingTest3EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "NIST-test-policy-2",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-2"
+  },
+  {
+   "name": "4.10.4 Invalid Policy Mapping Test4",
+   "number": "4.10.4",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "P12Mapping1to3CACert",
+    "P12Mapping1to3subCACert",
+    "P12Mapping1to3subsubCACert",
+    "InvalidPolicyMappingTest4EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.10.5 Valid Policy Mapping Test5 (Subpart 1)",
+   "number": "4.10.5",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "P1Mapping1to234CACert",
+    "P1Mapping1to234subCACert",
+    "ValidPolicyMappingTest5EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "NIST-test-policy-1",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.10.5 Valid Policy Mapping Test5 (Subpart 2)",
+   "number": "4.10.5",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "P1Mapping1to234CACert",
+    "P1Mapping1to234subCACert",
+    "ValidPolicyMappingTest5EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "NIST-test-policy-6",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.10.6 Valid Policy Mapping Test6 (Subpart 1)",
+   "number": "4.10.6",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "P1Mapping1to234CACert",
+    "P1Mapping1to234subCACert",
+    "ValidPolicyMappingTest6EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "NIST-test-policy-1",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.10.6 Valid Policy Mapping Test6 (Subpart 2)",
+   "number": "4.10.6",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "P1Mapping1to234CACert",
+    "P1Mapping1to234subCACert",
+    "ValidPolicyMappingTest6EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "NIST-test-policy-6",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.10.7 Invalid Mapping From anyPolicy Test7",
+   "number": "4.10.7",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "MappingFromanyPolicyCACert",
+    "InvalidMappingFromanyPolicyTest7EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.10.8 Invalid Mapping To anyPolicy Test8",
+   "number": "4.10.8",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "MappingToanyPolicyCACert",
+    "InvalidMappingToanyPolicyTest8EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.10.9 Valid Policy Mapping Test9",
+   "number": "4.10.9",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "PanyPolicyMapping1to2CACert",
+    "ValidPolicyMappingTest9EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.10.10 Invalid Policy Mapping Test10",
+   "number": "4.10.10",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "GoodCACert",
+    "GoodsubCAPanyPolicyMapping1to2CACert",
+    "InvalidPolicyMappingTest10EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.10.11 Valid Policy Mapping Test11",
+   "number": "4.10.11",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "GoodCACert",
+    "GoodsubCAPanyPolicyMapping1to2CACert",
+    "ValidPolicyMappingTest11EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.10.12 Valid Policy Mapping Test12 (Subpart 1)",
+   "number": "4.10.12",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "P12Mapping1to3CACert",
+    "ValidPolicyMappingTest12EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "NIST-test-policy-1",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.10.12 Valid Policy Mapping Test12 (Subpart 2)",
+   "number": "4.10.12",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "P12Mapping1to3CACert",
+    "ValidPolicyMappingTest12EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "NIST-test-policy-2",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-2"
+  },
+  {
+   "name": "4.10.13 Valid Policy Mapping Test13 (Subpart 1)",
+   "number": "4.10.13",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "P1anyPolicyMapping1to2CACert",
+    "ValidPolicyMappingTest13EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.10.13 Valid Policy Mapping Test13 (Subpart 2)",
+   "number": "4.10.13",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "P1anyPolicyMapping1to2CACert",
+    "ValidPolicyMappingTest13EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "NIST-test-policy-1,NIST-test-policy-2",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.10.13 Valid Policy Mapping Test13 (Subpart 3)",
+   "number": "4.10.13",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "P1anyPolicyMapping1to2CACert",
+    "ValidPolicyMappingTest13EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "NIST-test-policy-2",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.10.14 Valid Policy Mapping Test14",
+   "number": "4.10.14",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "P1anyPolicyMapping1to2CACert",
+    "ValidPolicyMappingTest14EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.11.1 Invalid inhibitPolicyMapping Test1",
+   "number": "4.11.1",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "inhibitPolicyMapping0CACert",
+    "inhibitPolicyMapping0subCACert",
+    "InvalidinhibitPolicyMappingTest1EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.11.2 Valid inhibitPolicyMapping Test2",
+   "number": "4.11.2",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "inhibitPolicyMapping1P12CACert",
+    "inhibitPolicyMapping1P12subCACert",
+    "ValidinhibitPolicyMappingTest2EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.11.3 Invalid inhibitPolicyMapping Test3",
+   "number": "4.11.3",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "inhibitPolicyMapping1P12CACert",
+    "inhibitPolicyMapping1P12subCACert",
+    "inhibitPolicyMapping1P12subsubCACert",
+    "InvalidinhibitPolicyMappingTest3EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.11.4 Valid inhibitPolicyMapping Test4",
+   "number": "4.11.4",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "inhibitPolicyMapping1P12CACert",
+    "inhibitPolicyMapping1P12subCACert",
+    "inhibitPolicyMapping1P12subsubCACert",
+    "ValidinhibitPolicyMappingTest4EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-2"
+  },
+  {
+   "name": "4.11.5 Invalid inhibitPolicyMapping Test5",
+   "number": "4.11.5",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "inhibitPolicyMapping5CACert",
+    "inhibitPolicyMapping5subCACert",
+    "inhibitPolicyMapping5subsubCACert",
+    "inhibitPolicyMapping5subsubsubCACert",
+    "InvalidinhibitPolicyMappingTest5EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.11.6 Invalid inhibitPolicyMapping Test6",
+   "number": "4.11.6",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "inhibitPolicyMapping1P12CACert",
+    "inhibitPolicyMapping1P12subCAIPM5Cert",
+    "inhibitPolicyMapping1P12subsubCAIPM5Cert",
+    "InvalidinhibitPolicyMappingTest6EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.11.7 Valid Self-Issued inhibitPolicyMapping Test7",
+   "number": "4.11.7",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "inhibitPolicyMapping1P1CACert",
+    "inhibitPolicyMapping1P1SelfIssuedCACert",
+    "inhibitPolicyMapping1P1subCACert",
+    "ValidSelfIssuedinhibitPolicyMappingTest7EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.11.8 Invalid Self-Issued inhibitPolicyMapping Test8",
+   "number": "4.11.8",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "inhibitPolicyMapping1P1CACert",
+    "inhibitPolicyMapping1P1SelfIssuedCACert",
+    "inhibitPolicyMapping1P1subCACert",
+    "inhibitPolicyMapping1P1subsubCACert",
+    "InvalidSelfIssuedinhibitPolicyMappingTest8EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.11.9 Invalid Self-Issued inhibitPolicyMapping Test9",
+   "number": "4.11.9",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "inhibitPolicyMapping1P1CACert",
+    "inhibitPolicyMapping1P1SelfIssuedCACert",
+    "inhibitPolicyMapping1P1subCACert",
+    "inhibitPolicyMapping1P1subsubCACert",
+    "InvalidSelfIssuedinhibitPolicyMappingTest9EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.11.10 Invalid Self-Issued inhibitPolicyMapping Test10",
+   "number": "4.11.10",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "inhibitPolicyMapping1P1CACert",
+    "inhibitPolicyMapping1P1SelfIssuedCACert",
+    "inhibitPolicyMapping1P1subCACert",
+    "inhibitPolicyMapping1P1SelfIssuedsubCACert",
+    "InvalidSelfIssuedinhibitPolicyMappingTest10EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.11.11 Invalid Self-Issued inhibitPolicyMapping Test11",
+   "number": "4.11.11",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "inhibitPolicyMapping1P1CACert",
+    "inhibitPolicyMapping1P1SelfIssuedCACert",
+    "inhibitPolicyMapping1P1subCACert",
+    "inhibitPolicyMapping1P1SelfIssuedsubCACert",
+    "InvalidSelfIssuedinhibitPolicyMappingTest11EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.12.1 Invalid inhibitAnyPolicy Test1",
+   "number": "4.12.1",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "inhibitAnyPolicy0CACert",
+    "InvalidinhibitAnyPolicyTest1EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.12.2 Valid inhibitAnyPolicy Test2",
+   "number": "4.12.2",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "inhibitAnyPolicy0CACert",
+    "ValidinhibitAnyPolicyTest2EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.12.3 inhibitAnyPolicy Test3 (Subpart 1)",
+   "number": "4.12.3",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "inhibitAnyPolicy1CACert",
+    "inhibitAnyPolicy1subCA1Cert",
+    "inhibitAnyPolicyTest3EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.12.3 inhibitAnyPolicy Test3 (Subpart 2)",
+   "number": "4.12.3",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "inhibitAnyPolicy1CACert",
+    "inhibitAnyPolicy1subCA1Cert",
+    "inhibitAnyPolicyTest3EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": true,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.12.4 Invalid inhibitAnyPolicy Test4",
+   "number": "4.12.4",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "inhibitAnyPolicy1CACert",
+    "inhibitAnyPolicy1subCA1Cert",
+    "InvalidinhibitAnyPolicyTest4EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.12.5 Invalid inhibitAnyPolicy Test5",
+   "number": "4.12.5",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "inhibitAnyPolicy5CACert",
+    "inhibitAnyPolicy5subCACert",
+    "inhibitAnyPolicy5subsubCACert",
+    "InvalidinhibitAnyPolicyTest5EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.12.6 Invalid inhibitAnyPolicy Test6",
+   "number": "4.12.6",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "inhibitAnyPolicy1CACert",
+    "inhibitAnyPolicy1subCAIAP5Cert",
+    "InvalidinhibitAnyPolicyTest6EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.12.7 Valid Self-Issued inhibitAnyPolicy Test7",
+   "number": "4.12.7",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "inhibitAnyPolicy1CACert",
+    "inhibitAnyPolicy1SelfIssuedCACert",
+    "inhibitAnyPolicy1subCA2Cert",
+    "ValidSelfIssuedinhibitAnyPolicyTest7EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.12.8 Invalid Self-Issued inhibitAnyPolicy Test8",
+   "number": "4.12.8",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "inhibitAnyPolicy1CACert",
+    "inhibitAnyPolicy1SelfIssuedCACert",
+    "inhibitAnyPolicy1subCA2Cert",
+    "inhibitAnyPolicy1subsubCA2Cert",
+    "InvalidSelfIssuedinhibitAnyPolicyTest8EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  },
+  {
+   "name": "4.12.9 Valid Self-Issued inhibitAnyPolicy Test9",
+   "number": "4.12.9",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "inhibitAnyPolicy1CACert",
+    "inhibitAnyPolicy1SelfIssuedCACert",
+    "inhibitAnyPolicy1subCA2Cert",
+    "inhibitAnyPolicy1SelfIssuedsubCA2Cert",
+    "ValidSelfIssuedinhibitAnyPolicyTest9EE"
+   ],
+   "should_validate": true,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": "NIST-test-policy-1"
+  },
+  {
+   "name": "4.12.10 Invalid Self-Issued inhibitAnyPolicy Test10",
+   "number": "4.12.10",
+   "certs": [
+    "TrustAnchorRootCertificate",
+    "inhibitAnyPolicy1CACert",
+    "inhibitAnyPolicy1SelfIssuedCACert",
+    "inhibitAnyPolicy1subCA2Cert",
+    "InvalidSelfIssuedinhibitAnyPolicyTest10EE"
+   ],
+   "should_validate": false,
+   "initial_policy_set": "anyPolicy",
+   "initial_explicit_policy": false,
+   "initial_policy_mapping_inhibit": false,
+   "initial_inhibit_any_policy": false,
+   "user_constrained_policy_set": ""
+  }
+ ]
+}

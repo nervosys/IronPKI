@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Verification
+- NIST's PKITS, sections 4.8 to 4.12 (certificate policies,
+  requireExplicitPolicy, policy mappings, inhibitPolicyMapping,
+  inhibitAnyPolicy): 88 cases with the suite's inputs and expected results,
+  run through both validators in `tests/pkits.rs`. The 80 that reach policy
+  processing get the suite's verdict and, where policies are named, its
+  user-constrained-policy-set. In six the last certificate is a CA
+  certificate, which this crate never accepts as an end entity; two of
+  them the suite accepts. Two more are refused as the suite says, but at
+  parse. The certificates are NIST's, unchanged; the cases were extracted
+  from BoringSSL's encoding of the suite and checked against the PKITS
+  document in four places. Of 30 deliberate breaks of the policy rules
+  these cases catch 18: none of them maps a policy under anyPolicy.
+
 ## 0.2.1 (2026-10-11)
 
 Two defects in how certificate policy processing bounds its work, both in

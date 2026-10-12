@@ -41,6 +41,10 @@ builds on. No CMVP certificate exists for either.
   of them with a caller's own policy inputs, get
   the same verdict from OpenSSL and from both validators. They cover what
   OpenSSL will issue from its command line, which is well-formed.
+- NIST's PKITS, sections 4.8 to 4.12: 80 certificate policy cases with the
+  suite's own inputs and expected results, all judged as the suite says;
+  six more end in a CA certificate, which is refused before its policies
+  are looked at (`tests/vectors/pkits`);
 - certificate policy processing compared with RFC 5280's own procedure,
   the policy tree written out as a test, on 300,000 paths drawn from a
   fixed sequence, half of them with a caller's inputs drawn too.
