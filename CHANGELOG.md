@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.2.1 (not released)
+
+Two defects in how certificate policy processing bounds its work, both in
+0.1.3 and 0.2.0. Neither accepted a path it should not have. No API
+change.
+
+### Fixed
+- Paths RFC 5280 accepts were refused as too involved. The work was
+  counted in evaluations, 8,192 to a path, and ordinary paths needed
+  more: five certificates listing 30 policies each, with a caller naming
+  64 policies, and no mappings or anyPolicy anywhere. Work is now counted
+  by list entries examined, a million to a path; a policy the caller names
+  that the path never mentions is dismissed for the cost of looking.
+  Eight certificates of 100 policies each with 64 named take a tenth of
+  the budget. A path whose mappings fan in at level after
+  level can still exhaust it and be refused: nothing is remembered
+  between questions, so such a path multiplies them.
+- The bound did not bound the time. Scans for anyPolicy were not counted,
+  and a certificate could list one policy 256 times, so a path under a
+  trusted anchor could be made to take 170 ms for one evaluation at the
+  default path length, and 1.2 s at 64 certificates. Whether a level has
+  an anyPolicy node is now worked out once for the path, every scan is
+  counted by its length, and exhausting the budget takes about 15 ms on
+  the same machine.
+
+### Changed
+- A certificate that lists a policy twice no longer parses (RFC 5280
+  section 4.2.1.4: a policy appears once), and neither does one whose
+  policy qualifiers are not each an identifier and one value. Both were
+  accepted before (REQ-X509-089).
+
+### Verification
+- These were found by a second reading of `src/x509_policy.rs` against
+  RFC 5280's text, made by another instance of the model that wrote it and
+  given the code and the RFC only. It is not an independent review. It
+  wrote a reference of its own, compared 18 million paths drawn at random
+  and found no wrong verdict; it found the two defects above and that the
+  parser accepted what is now refused.
+- The paths it found refused are tests, with the steps each takes; the
+  work for a path is exposed to the tests, and one path's cost is pinned
+  to the step.
+- The comparison with the tree in the tests draws wider paths, as that
+  reading asked: up to eight certificates over six policies, lists in any
+  order, and a caller's list with duplicates, policies no certificate has
+  and anyPolicy. 400,000 paths; those that exhaust the budget are counted
+  and held to fewer than one in a thousand.
+
 ## 0.2.0 (2026-10-11)
 
 A caller can say which certificate policies it accepts. One breaking
@@ -76,7 +123,8 @@ certificate identifiers. Two functions are added; nothing is removed.
     where it was accepted if the requirement was not marked critical.
   The trust anchor's own policy extensions are not processed. A caller
   cannot yet name the policies it accepts or require one itself. The work
-  is bounded: a path whose policies need more than 8,192 evaluations is
+  is bounded: a path whose policies need more than 8,192 evaluations (a
+  bound that 0.2.1 replaces, having refused paths it should not have) is
   refused, as is one of more than 64 certificates.
 - The four policy extensions are held to their encodings when a
   certificate is parsed (REQ-X509-089): `certificatePolicies` and

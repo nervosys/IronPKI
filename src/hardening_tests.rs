@@ -1384,6 +1384,55 @@ fn policy_extensions_are_held_to_their_encodings() {
         cp(&tlv(0x30, &list))
     };
     assert_eq!(parses(many(256)), Ok(()));
+    // A policy appears once (RFC 5280 section 4.2.1.4), wherever the
+    // second is.
+    for twice in [
+        &[POLICY_1, POLICY_1][..],
+        &[POLICY_1, POLICY_2, POLICY_1],
+        &[POLICY_2, POLICY_1, POLICY_3, POLICY_1],
+        &[ANY_POLICY, ANY_POLICY],
+    ] {
+        let list: Vec<u8> = twice
+            .iter()
+            .flat_map(|p| tlv(0x30, &tlv(0x06, p)))
+            .collect();
+        assert_eq!(
+            parses(cp(&tlv(0x30, &list))),
+            bad("a certificate policy appears twice")
+        );
+    }
+    // A qualifier is an identifier and one value.
+    let qualified = |qualifiers: &[u8]| {
+        parses(cp(&information(
+            &[oid.clone(), tlv(0x30, qualifiers)].concat(),
+        )))
+    };
+    let cps = tlv(0x06, &[0x2b, 6, 1, 5, 5, 7, 2, 1]);
+    let uri = tlv(0x16, b"https://cps.test/");
+    assert_eq!(
+        qualified(&[qualifier.clone(), qualifier.clone()].concat()),
+        Ok(())
+    );
+    assert!(qualified(&[0xff]).is_err(), "not DER");
+    assert!(qualified(&tlv(0x30, &cps)).is_err(), "no value");
+    assert!(qualified(&tlv(0x30, &uri)).is_err(), "no identifier");
+    assert!(
+        qualified(&tlv(
+            0x30,
+            &[cps.clone(), uri.clone(), uri.clone()].concat()
+        ))
+        .is_err(),
+        "two values"
+    );
+    assert!(
+        qualified(&tlv(
+            0x30,
+            &[tlv(0x06, &[0x2a, 0x80, 0x01]), uri.clone()].concat()
+        ))
+        .is_err(),
+        "an identifier not minimally encoded"
+    );
+    assert!(qualified(&[qualifier.clone(), vec![0x05, 0x00]].concat()).is_err());
     assert_eq!(parses(many(257)), bad("too many certificate policies"));
 
     assert_eq!(parses(policy_mappings(&[(POLICY_1, POLICY_2)])), Ok(()));

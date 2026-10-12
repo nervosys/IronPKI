@@ -47,7 +47,7 @@ A crash input becomes a regression test in `src/` alongside the fix.
 ## Results so far
 
 Windows 11, nightly, AddressSanitizer, on a loaded machine, 2026-10-10, at
-IronPKI 0.2.0 before its release, with URI and directory-name
+IronPKI 0.2.1 before its release, with URI and directory-name
 constraints, names of both forms and every policy extension in the
 differential fixtures, and the caller's policy inputs varied. No crashes, no sanitizer reports and no
 disagreement between the validators (leak detection is not available with
@@ -55,8 +55,8 @@ ASan on Windows):
 
 | Target | Runs | Time |
 |---|---:|---:|
-| `pki` | 658,801 | 301 s |
-| `pki_differential` | 596,268 | 301 s |
+| `pki` | 1,791,458 | 301 s |
+| `pki_differential` | 1,114,645 | 301 s |
 
 Two longer runs, 1,801 s each, without a finding: `pki_differential` on
 0.1.3 as released (4,467,003 runs), and `pki` on 0.2.0 before its release

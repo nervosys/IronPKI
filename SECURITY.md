@@ -49,6 +49,12 @@ Most of the code and its tests came from IronSocketLayer 0.3.4, where it was
 also exercised against public servers through TLS handshakes. **That has not
 been repeated here.**
 
+One part has had a second reading, which is not a review by someone else:
+`src/x509_policy.rs` was read against RFC 5280's text by another instance of
+the model that wrote it, given the code and the RFC only. It found no wrong
+verdict, in 18 million comparisons against a reference of its own, and two
+defects in the work bound, which 0.2.1 fixes.
+
 None of that substitutes for review by someone else.
 
 ## What it does not do
@@ -62,7 +68,15 @@ So that nothing is assumed:
   are valid, not what else was. Naming policies requires none by itself.
   Policy qualifiers are not examined. A pinned leaf has no path, so
   nothing is asked of its policies. A path whose policies take more than a
-  fixed amount of work to evaluate is refused.
+  fixed amount of work to evaluate is refused: a million list entries
+  examined. Nothing is remembered between the questions asked of a path,
+  so one whose policy mappings fan in at level after level can exhaust
+  that although RFC 5280 would accept it.
+- A certificate counts as self-issued, for the policy counts that exempt
+  one, when its issuer and subject are the same bytes, not by the name
+  comparison of RFC 5280 section 7.1. A name that matches only after
+  normalisation is treated as not self-issued, which errs towards
+  refusal.
 - Name constraints are evaluated for dNSName, iPAddress, rfc822Name,
   directoryName and uniformResourceIdentifier. Any other form in a
   constraint fails the path closed.
