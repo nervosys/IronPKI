@@ -1,4 +1,6 @@
-//! Agreement with OpenSSL, in both directions, on certificates and CRLs.
+//! Agreement with OpenSSL, in both directions, on certificates, CRLs,
+//! OCSP responses, name constraints, certificate policies and certificate
+//! requests.
 //!
 //! Ignored by default: they need `openssl` 3.5 or later on `PATH` (3.5 for
 //! ML-DSA).
@@ -133,17 +135,11 @@ fn key(kind: Kind) -> SoftwareSigner {
 }
 
 fn params<'a>(cn: &'a str, dns: &'a [&'a str], ca: bool, serial: u8) -> CertificateParams<'a> {
-    CertificateParams {
-        subject_cn: cn,
-        dns_names: dns,
-        ip_addresses: &[],
-        not_before: now() - 3600,
-        not_after: now() + 86_400,
-        is_ca: ca,
-        path_len: None,
-        usage: if ca { &[] } else { &[Purpose::TlsServer] },
-        serial: [serial; 16],
-    }
+    let mut params = CertificateParams::new(cn, now() - 3600, now() + 86_400, [serial; 16]);
+    params.dns_names = dns;
+    params.is_ca = ca;
+    params.usage = if ca { &[] } else { &[Purpose::TlsServer] };
+    params
 }
 
 /// A root, an intermediate and a leaf of one key kind, issued here.
@@ -1389,4 +1385,314 @@ fn certificate_policies_are_judged_as_openssl_judges_them() {
             );
         }
     }
+}
+
+const REQUEST_URI: &str = "nanda:agent/alpha-7";
+
+/// This crate reads the PKCS#10 requests OpenSSL makes, for every kind of
+/// key it verifies with: each verifies, and gives back the subject, key and
+/// names asked for, URIs included, and the other extensions as requested.
+/// A request with a challenge password beside its extensions reads the
+/// same. A changed byte in the signature fails verification. REQ-CSR-001,
+/// REQ-CSR-002, REQ-CSR-003.
+#[test]
+#[ignore = "needs openssl 3.5+ on PATH"]
+fn this_crate_reads_the_requests_openssl_makes() {
+    use ironpki::x509::request::CertificateRequest;
+    // ECDSA is accepted with each curve's own hash only; OpenSSL's default
+    // is SHA-256 whatever the curve, so P-384 and P-521 are told theirs.
+    let kinds: &[(&str, &[&str])] = &[
+        (
+            "p256",
+            &["-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256"],
+        ),
+        (
+            "p384",
+            &[
+                "-newkey",
+                "ec",
+                "-pkeyopt",
+                "ec_paramgen_curve:P-384",
+                "-sha384",
+            ],
+        ),
+        (
+            "p521",
+            &[
+                "-newkey",
+                "ec",
+                "-pkeyopt",
+                "ec_paramgen_curve:P-521",
+                "-sha512",
+            ],
+        ),
+        ("ed25519", &["-newkey", "ed25519"]),
+        ("rsa3072", &["-newkey", "rsa:3072"]),
+        ("ml-dsa-44", &["-newkey", "ML-DSA-44"]),
+        ("ml-dsa-87", &["-newkey", "ML-DSA-87"]),
+    ];
+    for (label, newkey) in kinds {
+        for password in [false, true] {
+            let dir = workdir(&format!("request-openssl-{label}-{password}"));
+            std::fs::write(
+                dir.join("req.cnf"),
+                format!(
+                    "[req]\ndistinguished_name=dn\nattributes=attrs\nprompt=no\n\
+                     [dn]\nCN=agent\n[attrs]\n{}",
+                    if password {
+                        "challengePassword=let-me-in\n"
+                    } else {
+                        ""
+                    }
+                ),
+            )
+            .unwrap();
+            must(
+                &[
+                    &["req", "-new", "-nodes", "-config", "req.cnf"][..],
+                    newkey,
+                    &[
+                        "-keyout",
+                        "key.pem",
+                        "-out",
+                        "req.pem",
+                        "-addext",
+                        &format!("subjectAltName=DNS:agent.example,URI:{REQUEST_URI},IP:192.0.2.7"),
+                        "-addext",
+                        "keyUsage=critical,digitalSignature",
+                    ],
+                ]
+                .concat(),
+                &dir,
+            );
+            let pem = std::fs::read_to_string(dir.join("req.pem")).unwrap();
+            let der = from_pem("CERTIFICATE REQUEST", &pem);
+            let what = format!("{label}, challenge password {password}");
+            let request = CertificateRequest::parse(&der).unwrap_or_else(|e| panic!("{what}: {e}"));
+            request
+                .verify(VERIFY_ALGORITHMS)
+                .unwrap_or_else(|e| panic!("{what}: {e}"));
+            assert_eq!(request.subject_common_name(), Some("agent"), "{what}");
+            assert_eq!(request.dns_names(), ["agent.example"], "{what}");
+            assert_eq!(request.uri_names(), [REQUEST_URI], "{what}");
+            assert_eq!(request.ip_addresses().len(), 1, "{what}");
+            let (critical, _) = request.extension(&[0x55, 0x1d, 0x0f]).unwrap();
+            assert!(critical, "{what}: keyUsage as requested");
+            // The key in the request is the one OpenSSL generated.
+            let key_der = Command::new("openssl")
+                .args(["pkey", "-in", "key.pem", "-pubout", "-outform", "DER"])
+                .current_dir(&dir)
+                .output()
+                .unwrap()
+                .stdout;
+            assert_eq!(request.spki_der(), key_der, "{what}");
+
+            if *label == "p384" && !password {
+                // OpenSSL's default pairing, SHA-256 on P-384, is refused
+                // as unsupported, not as a bad signature.
+                must(
+                    &[
+                        "req",
+                        "-new",
+                        "-key",
+                        "key.pem",
+                        "-config",
+                        "req.cnf",
+                        "-sha256",
+                        "-out",
+                        "sha256.pem",
+                    ],
+                    &dir,
+                );
+                let pem = std::fs::read_to_string(dir.join("sha256.pem")).unwrap();
+                let der = from_pem("CERTIFICATE REQUEST", &pem);
+                let e = CertificateRequest::parse(&der)
+                    .unwrap()
+                    .verify(VERIFY_ALGORITHMS)
+                    .unwrap_err();
+                assert_eq!(e.kind(), ErrorKind::UnsupportedCertificate, "{e}");
+            }
+            let mut tampered = der.clone();
+            *tampered.last_mut().unwrap() ^= 1;
+            let verdict = CertificateRequest::parse(&tampered)
+                .map(|r| r.verify(VERIFY_ALGORITHMS).map(|_| ()))
+                .and_then(|r| r);
+            assert!(verdict.is_err(), "{what}: a changed signature verified");
+        }
+    }
+}
+
+/// OpenSSL verifies the self-signature of the requests this crate makes, for
+/// every kind of key it makes them with, and reads the names in them.
+/// REQ-CSR-004.
+#[test]
+#[ignore = "needs openssl 3.5+ on PATH"]
+fn openssl_verifies_the_requests_this_crate_makes() {
+    use ironpki::x509::request::{RequestParams, build};
+    for kind in [
+        Kind::P256,
+        Kind::P384,
+        Kind::P521,
+        Kind::Ed25519,
+        Kind::MlDsa44,
+        Kind::MlDsa65,
+        Kind::MlDsa87,
+    ] {
+        let dir = workdir(&format!("request-ours-{kind:?}"));
+        let signer = key(kind);
+        let uris = [REQUEST_URI];
+        let mut params = RequestParams::new("agent");
+        params.dns_names = &["agent.example"];
+        params.uris = &uris;
+        let der = build(&params, &signer, &mut rng()).unwrap();
+        std::fs::write(dir.join("req.pem"), to_pem("CERTIFICATE REQUEST", &der)).unwrap();
+        let text = must(
+            &["req", "-in", "req.pem", "-verify", "-noout", "-text"],
+            &dir,
+        );
+        assert!(
+            text.contains("verify OK") || text.contains("self-signature verify OK"),
+            "{kind:?}: {text}"
+        );
+        assert!(
+            text.contains(&format!("URI:{REQUEST_URI}")),
+            "{kind:?}: {text}"
+        );
+        assert!(text.contains("DNS:agent.example"), "{kind:?}: {text}");
+        // And it refuses one whose signature was changed.
+        let mut tampered = der.clone();
+        *tampered.last_mut().unwrap() ^= 1;
+        std::fs::write(
+            dir.join("bad.pem"),
+            to_pem("CERTIFICATE REQUEST", &tampered),
+        )
+        .unwrap();
+        let (ok, text) = openssl(&["req", "-in", "bad.pem", "-verify", "-noout"], &dir);
+        assert!(!ok || !text.contains("verify OK"), "{kind:?}: {text}");
+    }
+}
+
+/// URI alternative names, both ways: a certificate OpenSSL issues from its
+/// own request reads here with the URI it was given; a certificate this
+/// crate issues from OpenSSL's request, copying the URI, validates in
+/// OpenSSL with the URI in it. REQ-X509-091, REQ-X509-092.
+#[test]
+#[ignore = "needs openssl 3.5+ on PATH"]
+fn uri_names_agree_with_openssl() {
+    use ironpki::x509::request::CertificateRequest;
+    let dir = workdir("uri-names");
+    let ec = ["-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256"];
+    must(
+        &[
+            &["req", "-x509", "-nodes", "-days", "2"][..],
+            &ec,
+            &[
+                "-keyout",
+                "cakey.pem",
+                "-out",
+                "ca.pem",
+                "-subj",
+                "/CN=URI CA",
+                "-addext",
+                "basicConstraints=critical,CA:TRUE",
+                "-addext",
+                "keyUsage=critical,keyCertSign",
+            ],
+        ]
+        .concat(),
+        &dir,
+    );
+    must(
+        &[
+            &["req", "-new", "-nodes"][..],
+            &ec,
+            &[
+                "-keyout",
+                "key.pem",
+                "-out",
+                "req.pem",
+                "-subj",
+                "/CN=agent",
+                "-addext",
+                &format!("subjectAltName=URI:{REQUEST_URI}"),
+            ],
+        ]
+        .concat(),
+        &dir,
+    );
+    // OpenSSL issues from its own request.
+    must(
+        &[
+            "x509",
+            "-req",
+            "-in",
+            "req.pem",
+            "-CA",
+            "ca.pem",
+            "-CAkey",
+            "cakey.pem",
+            "-days",
+            "1",
+            "-copy_extensions",
+            "copyall",
+            "-out",
+            "theirs.pem",
+        ],
+        &dir,
+    );
+    let theirs = read_cert(&dir, "theirs.pem");
+    assert_eq!(
+        x509::Certificate::parse(&theirs).unwrap().uri_names(),
+        [REQUEST_URI]
+    );
+
+    // This crate issues from the same request, as a CA of its own.
+    let ca_key = key(Kind::P384);
+    let mut ca = params("Iron URI CA", &[], true, 7);
+    ca.usage = &[];
+    let ca_cert = x509::self_signed(&ca, &ca_key, &mut rng()).unwrap();
+    let pem = std::fs::read_to_string(dir.join("req.pem")).unwrap();
+    let der = from_pem("CERTIFICATE REQUEST", &pem);
+    let request = CertificateRequest::parse(&der).unwrap();
+    request.verify(VERIFY_ALGORITHMS).unwrap();
+    let uris = request.uri_names();
+    let mut leaf = CertificateParams::new("agent", now() - 3600, now() + 86_400, [8; 16]);
+    leaf.uris = &uris;
+    leaf.usage = &[Purpose::TlsClient];
+    let ours = x509::issue(&leaf, request.spki_der(), &ca_cert, &ca_key, &mut rng()).unwrap();
+    std::fs::write(
+        dir.join("ourca.pem"),
+        to_pem(ic_pkix::pem::CERTIFICATE, &ca_cert),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("ours.pem"),
+        to_pem(ic_pkix::pem::CERTIFICATE, &ours),
+    )
+    .unwrap();
+    let text = must(
+        &[
+            "verify",
+            "-x509_strict",
+            "-purpose",
+            "sslclient",
+            "-CAfile",
+            "ourca.pem",
+            "ours.pem",
+        ],
+        &dir,
+    );
+    assert!(text.contains("ours.pem: OK"), "{text}");
+    let text = must(
+        &[
+            "x509",
+            "-in",
+            "ours.pem",
+            "-noout",
+            "-ext",
+            "subjectAltName",
+        ],
+        &dir,
+    );
+    assert!(text.contains(&format!("URI:{REQUEST_URI}")), "{text}");
 }

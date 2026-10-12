@@ -62,32 +62,27 @@ pub fn pki() -> &'static Pki {
         let mut r = rng();
         let ca_key = key(1);
         let ca_cert = x509::self_signed(
-            &CertificateParams {
-                subject_cn: "IronPKI Fuzz Root",
-                dns_names: &[],
-                ip_addresses: &[],
-                not_before: NOW - 86_400,
-                not_after: NOW + 86_400,
-                is_ca: true,
-                path_len: Some(1),
-                usage: &[],
-                serial: [1; 16],
+            &{
+                let mut params = CertificateParams::new(
+                    "IronPKI Fuzz Root",
+                    NOW - 86_400,
+                    NOW + 86_400,
+                    [1; 16],
+                );
+                params.is_ca = true;
+                params.path_len = Some(1);
+                params
             },
             &ca_key,
             &mut r,
         )
         .unwrap();
         let leaf = x509::issue(
-            &CertificateParams {
-                subject_cn: NAME,
-                dns_names: &[NAME],
-                ip_addresses: &[],
-                not_before: NOW - 86_400,
-                not_after: NOW + 86_400,
-                is_ca: false,
-                path_len: None,
-                usage: &[Purpose::TlsServer],
-                serial: [2; 16],
+            &{
+                let mut params = CertificateParams::new(NAME, NOW - 86_400, NOW + 86_400, [2; 16]);
+                params.dns_names = &[NAME];
+                params.usage = &[Purpose::TlsServer];
+                params
             },
             key(2).public_key(),
             &ca_cert,

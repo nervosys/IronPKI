@@ -63,6 +63,8 @@ pub mod crl;
 pub mod ocsp;
 #[path = "x509_policy.rs"]
 mod policy;
+#[path = "x509_request.rs"]
+pub mod request;
 pub use policy::{MAX_ACCEPTABLE, PolicyOptions, PolicyOutcome};
 
 const OID_ECDSA_SHA1: &[u8] = &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x01];
@@ -1000,6 +1002,23 @@ impl<'a> Certificate<'a> {
         let mut out = Vec::new();
         let _ = for_each_san(self.ext.san, |tag, v| {
             if tag == T_GN_DNS
+                && let Ok(s) = core::str::from_utf8(v)
+            {
+                out.push(s);
+            }
+        });
+        out
+    }
+
+    /// `uniformResourceIdentifier` subject alternative names, as written in
+    /// the certificate. Nothing is checked about them beyond what parsing
+    /// checks: each is a nonempty ASCII IA5String. Read them from a
+    /// certificate that has been validated; matching one against what was
+    /// expected is the caller's. `REQ-X509-091`.
+    pub fn uri_names(&self) -> Vec<&'a str> {
+        let mut out = Vec::new();
+        let _ = for_each_san(self.ext.san, |tag, v| {
+            if tag == T_GN_URI
                 && let Ok(s) = core::str::from_utf8(v)
             {
                 out.push(s);
@@ -3307,8 +3326,10 @@ pub fn verify_name(end_entity: &[u8], name: &ServerName<'_>) -> Result<()> {
 // Issuance
 // ---------------------------------------------------------------------------
 
-/// What to put in a certificate.
+/// What to put in a certificate. Made with [`CertificateParams::new`]; the
+/// fields are then set as needed.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub struct CertificateParams<'a> {
     /// Subject common name; may be empty when there are alternative names.
     pub subject_cn: &'a str,
@@ -3316,6 +3337,10 @@ pub struct CertificateParams<'a> {
     pub dns_names: &'a [&'a str],
     /// IP subject alternative names.
     pub ip_addresses: &'a [IpAddr],
+    /// URI subject alternative names: absolute URIs, a scheme and a colon
+    /// then anything printable, as RFC 5280 section 4.2.1.6 has them.
+    /// `REQ-X509-092`.
+    pub uris: &'a [&'a str],
     /// Start of validity, Unix seconds.
     pub not_before: u64,
     /// End of validity, Unix seconds.
@@ -3328,6 +3353,43 @@ pub struct CertificateParams<'a> {
     pub usage: &'a [Purpose],
     /// Serial number; made positive and minimal on encoding.
     pub serial: [u8; 16],
+}
+
+impl<'a> CertificateParams<'a> {
+    /// A certificate for `subject_cn`, valid from `not_before` to
+    /// `not_after` (Unix seconds), with serial number `serial`: an end
+    /// entity, with no alternative names and no extended key usage. Set the
+    /// other fields after.
+    pub fn new(subject_cn: &'a str, not_before: u64, not_after: u64, serial: [u8; 16]) -> Self {
+        Self {
+            subject_cn,
+            dns_names: &[],
+            ip_addresses: &[],
+            uris: &[],
+            not_before,
+            not_after,
+            is_ca: false,
+            path_len: None,
+            usage: &[],
+            serial,
+        }
+    }
+}
+
+/// Whether `uri` is one a certificate may name: an absolute URI (RFC 3986
+/// section 4.3), a scheme of a letter then letters, digits, `+`, `-` or
+/// `.`, a colon, and at least one more character, all printable ASCII with
+/// no space. RFC 5280 section 4.2.1.6 allows no relative reference.
+fn is_valid_certificate_uri(uri: &str) -> bool {
+    let Some((scheme, rest)) = uri.split_once(':') else {
+        return false;
+    };
+    scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+        && scheme
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'-' | b'.'))
+        && !rest.is_empty()
+        && uri.bytes().all(|b| b.is_ascii_graphic())
 }
 
 fn encode_name(cn: &str) -> Vec<u8> {
@@ -3414,7 +3476,10 @@ fn build(
     if params.path_len.is_some() && !params.is_ca {
         return Err(cfg("certificate path length requires a CA"));
     }
-    if params.subject_cn.is_empty() && params.dns_names.is_empty() && params.ip_addresses.is_empty()
+    if params.subject_cn.is_empty()
+        && params.dns_names.is_empty()
+        && params.ip_addresses.is_empty()
+        && params.uris.is_empty()
     {
         return Err(cfg(
             "a certificate needs a subject name or an alternative name",
@@ -3424,6 +3489,10 @@ fn build(
         if !is_valid_dns_name(n, true) {
             return Err(cfg("invalid DNS name in certificate parameters"));
         }
+    }
+    // REQ-X509-092: a URI that is not absolute is not issued.
+    if !params.uris.iter().all(|u| is_valid_certificate_uri(u)) {
+        return Err(cfg("invalid URI in certificate parameters"));
     }
     sign::public_key(subject_spki).map_err(|_| cfg("subject public key is not usable"))?;
     let scheme = *issuer_key
@@ -3488,10 +3557,13 @@ fn build(
         push_ext(&mut exts, OID_EXT_EKU, false, &v);
     }
 
-    if !params.dns_names.is_empty() || !params.ip_addresses.is_empty() {
+    if !params.dns_names.is_empty() || !params.ip_addresses.is_empty() || !params.uris.is_empty() {
         let mut body = Vec::new();
         for n in params.dns_names {
             push_tlv(&mut body, T_GN_DNS, n.as_bytes());
+        }
+        for u in params.uris {
+            push_tlv(&mut body, T_GN_URI, u.as_bytes());
         }
         for ip in params.ip_addresses {
             push_tlv(&mut body, T_GN_IP, ip.octets());
@@ -7517,6 +7589,7 @@ mod chain_tests {
             subject_cn: cn,
             dns_names: dns,
             ip_addresses: &[],
+            uris: &[],
             not_before: NOW - DAY,
             not_after: NOW + 365 * DAY,
             is_ca: ca,

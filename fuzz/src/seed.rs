@@ -11,7 +11,7 @@ use std::path::Path;
 
 use ironpki::Purpose;
 use ironpki::x509::{self, VerifyOptions, crl, ocsp};
-use ironpki_fuzz::{ALGORITHMS, LIMITS, NOW, diff_pki, diff_seed, pki, rng, sign_tbs};
+use ironpki_fuzz::{ALGORITHMS, LIMITS, NAME, NOW, diff_pki, diff_seed, pki, rng, sign_tbs};
 
 fn write(target: &str, name: &str, bytes: &[u8]) {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -84,6 +84,15 @@ fn main() {
     .unwrap();
     write("pki", "ocsp", &with_sel(3, &response));
     write("pki", "anchor", &with_sel(4, &p.ca_cert));
+    // A certificate request, with a URI among its names.
+    let mut request = x509::request::RequestParams::new("fuzz requester");
+    request.dns_names = &[NAME];
+    request.uris = &["nanda:fuzz/agent"];
+    let request = x509::request::build(&request, &p.ca_key, &mut rng()).unwrap();
+    x509::request::CertificateRequest::parse(&request)
+        .and_then(|r| r.verify(ALGORITHMS))
+        .expect("the request fixture verifies");
+    write("pki", "request", &with_sel(0, &request));
     // NameConstraints: permitted dNSName fuzz.test and rfc822Name fuzz.test.
     write(
         "pki",
@@ -138,6 +147,6 @@ fn main() {
     }
     println!(
         "wrote {} pki seeds and 32 pki_differential seeds",
-        9 + 2 * n
+        10 + 2 * n
     );
 }

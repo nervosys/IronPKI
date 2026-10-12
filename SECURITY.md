@@ -66,6 +66,10 @@ None of that substitutes for review by someone else.
 So that nothing is assumed:
 
 - It fetches nothing: no issuer certificates, CRLs or OCSP responses.
+- Of a certificate request's attributes only `extensionRequest` is read.
+  Nothing a request asks for is issued unless the CA puts it in the
+  certificate, and requested extensions other than subjectAltName are only
+  made readable.
 - Certificate policies are processed with the caller's inputs, which
   default to RFC 5280's: any policy acceptable, none required. A caller
   may name up to 64 acceptable policies, and a report says which of them

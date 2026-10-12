@@ -1,6 +1,6 @@
 //! Everything a caller hands this crate as DER it did not make: certificates,
-//! through the parser, name matching and both path validators; CRLs; OCSP
-//! responses; and trust anchors in both forms.
+//! through the parser, name matching and both path validators; certificate
+//! requests; CRLs; OCSP responses; and trust anchors in both forms.
 #![no_main]
 
 use ironpki::x509::{self, Certificate, RootStore, ServerName, VerifyOptions, crl::CrlStore};
@@ -32,12 +32,26 @@ fuzz_target!(|data: &[u8]| {
                 );
                 let _ = (c.not_before(), c.not_after(), c.is_ca(), c.common_name());
                 let _ = (c.dns_names(), c.ip_addresses(), c.signature_scheme());
+                let _ = c.uri_names();
                 let _ = c
                     .subject_public_key()
                     .map(|k| (k.kind_id(), k.classical_bits()));
             }
             let _ = x509::verify_name(body, &ServerName::Dns(NAME));
             let _ = x509::check_leaf_fixed(body, &opts);
+            // The input as a certificate request.
+            if let Ok(r) = x509::request::CertificateRequest::parse(body) {
+                let _ = (
+                    r.der(),
+                    r.subject_der(),
+                    r.subject_common_name(),
+                    r.spki_der(),
+                );
+                let _ = (r.dns_names(), r.ip_addresses(), r.uri_names());
+                let _ = r.extension(&[0x55, 0x1d, 0x11]);
+                let _ = r.subject_public_key().map(|k| k.kind_id());
+                let _ = r.verify(ALGORITHMS);
+            }
         }
         1 => {
             // The input as a leaf, then as an intermediate under a real

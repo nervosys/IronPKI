@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.3.0 (not released)
+
+URI alternative names, read and issued, and PKCS#10 certificate requests,
+read and made. One breaking change: `CertificateParams` can no longer be
+built field by field outside this crate.
+
+### Added
+- `Certificate::uri_names` (REQ-X509-091): a certificate's
+  uniformResourceIdentifier alternative names, as written. Read them from a
+  certificate that has been validated; matching one is the caller's.
+- `CertificateParams::uris` (REQ-X509-092): URIs to issue as alternative
+  names. A URI that is not absolute (a scheme, a colon, then at least one
+  printable character, no space) is refused, as RFC 5280 section 4.2.1.6
+  requires.
+- `CertificateParams::new(subject_cn, not_before, not_after, serial)`: an
+  end entity with no alternative names and no extended key usage; set the
+  other fields after.
+- `x509::request` (REQ-CSR-001 to 004), PKCS#10 (RFC 2986):
+  `CertificateRequest::parse` holds a request to DER and RFC 2986, and its
+  requested extensions to the rules for a certificate's;
+  `CertificateRequest::verify` checks the request was signed by the key it
+  names, under an algorithm the caller allows; the subject, key and
+  requested DNS, IP and URI names and extensions are readable; `build` makes
+  a request for a key. Nothing requested is issued unless the CA puts it in
+  the certificate: build `CertificateParams` from what is accepted and pass
+  `CertificateRequest::spki_der` to `issue`.
+
+### Changed
+- `CertificateParams` is `#[non_exhaustive]`, so that a field can be added
+  without breaking callers again. Use `CertificateParams::new`.
+
+### Not covered
+- Only a request's `extensionRequest` attribute is read. Others, such as a
+  challenge password, are checked for their shape and passed over.
+- ECDSA is verified with each curve's own hash only, in requests as in
+  certificates: P-256 with SHA-256, P-384 with SHA-384, P-521 with SHA-512.
+  OpenSSL signs a request with SHA-256 unless told otherwise, so a P-384 or
+  P-521 request it makes needs `-sha384` or `-sha512`; one without is
+  refused as unsupported.
+
+### Verification
+- Against OpenSSL 3.5.7, in `tests/openssl_interop.rs`: this crate reads
+  and verifies the requests OpenSSL makes, for ECDSA P-256, P-384 and P-521,
+  Ed25519, RSA and ML-DSA keys, with and without a challenge password beside
+  the requested extensions, and refuses one with a changed signature;
+  OpenSSL verifies the requests this crate makes, for every key kind it
+  makes them with, and reads their names; and URI names agree both ways,
+  in a certificate OpenSSL issues from its request and in one this crate
+  issues from the same request, which OpenSSL validates.
+- The `pki` fuzz target parses its input as a certificate request too, and
+  reads URI names; a request is among its seeds.
+
 ## 0.2.2 (2026-10-12)
 
 NIST's PKITS policy cases join the tests. No change to the library.

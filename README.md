@@ -5,7 +5,8 @@ issuer, built on IronCrypto.
 
 **Status: released; see [CHANGELOG.md](CHANGELOG.md).** `ironpki::x509` is IronSocketLayer
 0.3.4's certificate code, moved here with its tests: parsing, path
-validation, name matching, CRLs, OCSP responses and issuance. It validates
+validation, name matching, CRLs, OCSP responses, issuance and, since 0.3,
+PKCS#10 certificate requests. It validates
 for a `Purpose`, including a TPM endorsement key, within the caller's
 `Limits`, against the caller's `TrustAnchor`s. IronSocketLayer moves onto it
 in its 0.4.0.
@@ -42,7 +43,7 @@ checked against certificates made with PyCA `cryptography`.
 Done: `TrustAnchor` and `Limits` in the validator's interface; a report that
 names its anchor by subject and key; pinning a leaf as an explicit option.
 Done: a traceability matrix, [docs/TRACEABILITY.md](docs/TRACEABILITY.md), of
-154 requirements and the tests that verify them, enforced by a test.
+160 requirements and the tests that verify them, enforced by a test.
 Done: name constraints evaluated for rfc822Name, directoryName and URI names
 as well as DNS names and addresses; certificate policies processed, with the
 caller's own policy inputs; IronSocketLayer 0.4.0 depends on this crate in place
