@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0 (not released)
+## 0.4.0 (2026-10-16)
 
 Moves onto IronCrypto 0.3. Breaking only in that: IronCrypto's types appear
 in this crate's interface (`Signer`, `RandomSource`, `SignatureScheme`), so
