@@ -11,9 +11,10 @@ use ic_core::traits::RandomSource;
 use ic_pkix::{KeyAlgorithm, PrivateKeyInfo};
 use ic_sig::SoftwareSigner;
 use ironpki::sign::VERIFY_ALGORITHMS;
+use ironpki::x509::crl::{self, CrlStore};
 use ironpki::x509::ocsp::{self, CertStatus};
 use ironpki::x509::{self, CertificateParams, RootStore, VerifyOptions};
-use ironpki::{Limits, Purpose};
+use ironpki::{ErrorKind, Limits, Purpose};
 
 const NOW: u64 = 1_800_000_000;
 
@@ -94,7 +95,52 @@ fn nothing_validates_or_is_issued_in_the_error_state() {
         )
     };
 
+    // An intermediate and an expired one of the same name and key, the
+    // expired one first: a path search meets its expiry before it meets the
+    // module's refusal, and must not report the expiry.
+    let int_key = p256();
+    let mut int_params = CertificateParams::new(
+        "Error State Intermediate",
+        NOW - 3600,
+        NOW + 86_400,
+        [3; 16],
+    );
+    int_params.is_ca = true;
+    let int = x509::issue(
+        &int_params,
+        int_key.public_key(),
+        &root,
+        &root_key,
+        &mut rng(),
+    )
+    .unwrap();
+    int_params.not_after = NOW - 60;
+    int_params.serial = [4; 16];
+    let expired = x509::issue(
+        &int_params,
+        int_key.public_key(),
+        &root,
+        &root_key,
+        &mut rng(),
+    )
+    .unwrap();
+    let mut far_params = CertificateParams::new("far.test", NOW - 3600, NOW + 86_400, [5; 16]);
+    far_params.dns_names = &["far.test"];
+    far_params.usage = &[Purpose::TlsServer];
+    let far = x509::issue(
+        &far_params,
+        leaf_key.public_key(),
+        &int,
+        &int_key,
+        &mut rng(),
+    )
+    .unwrap();
+    let both: [&[u8]; 2] = [&expired, &int];
+    let crl = crl::build(&root, &root_key, &[], NOW - 60, NOW + 3600, 1, &mut rng()).unwrap();
+
     // While the module works, all of it does.
+    x509::verify_chain(&far, &both, &roots, &opts).unwrap();
+    CrlStore::new().add_der_for_issuer(&crl, &root).unwrap();
     x509::verify_chain(&leaf, &[], &roots, &opts).unwrap();
     x509::verify_chain_fixed(&leaf, &[], &roots, &opts).unwrap();
     check_staple().unwrap();
@@ -104,21 +150,35 @@ fn nothing_validates_or_is_issued_in_the_error_state() {
     let mut r = Fixed;
     ic_core::module::enter_error_state();
 
-    assert!(x509::verify_chain(&leaf, &[], &roots, &opts).is_err());
-    assert!(x509::verify_chain_fixed(&leaf, &[], &roots, &opts).is_err());
-    assert!(check_staple().is_err());
-    assert!(x509::self_signed(&ca, &root_key, &mut r).is_err());
-    assert!(
+    // REQ-ERR-001: each refusal says it is the module's, not a bad
+    // signature, an unknown CA or an unsigned response.
+    let refused = |e: ironpki::Error| assert_eq!(e.kind(), ErrorKind::ModuleState, "{e}");
+    refused(x509::verify_chain(&leaf, &[], &roots, &opts).unwrap_err());
+    refused(
+        x509::verify_chain_fixed(&leaf, &[], &roots, &opts)
+            .err()
+            .unwrap(),
+    );
+    refused(check_staple().unwrap_err());
+    refused(x509::verify_chain(&far, &both, &roots, &opts).unwrap_err());
+    refused(
+        x509::verify_chain_fixed(&far, &both, &roots, &opts)
+            .err()
+            .unwrap(),
+    );
+    refused(CrlStore::new().add_der_for_issuer(&crl, &root).unwrap_err());
+    refused(x509::self_signed(&ca, &root_key, &mut r).unwrap_err());
+    refused(
         x509::issue(
             &leaf_params,
             leaf_key.public_key(),
             &root,
             &root_key,
-            &mut r
+            &mut r,
         )
-        .is_err()
+        .unwrap_err(),
     );
-    assert!(
+    refused(
         ocsp::build_response(
             &leaf,
             &root,
@@ -128,6 +188,6 @@ fn nothing_validates_or_is_issued_in_the_error_state() {
             NOW + 3600,
             &mut r,
         )
-        .is_err()
+        .unwrap_err(),
     );
 }

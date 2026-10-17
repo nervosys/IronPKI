@@ -2618,10 +2618,17 @@ fn key_ids_disagree(cert: &Certificate<'_>, issuer_ski: Option<&[u8]>) -> bool {
     matches!((cert.ext.aki, issuer_ski), (Some(a), Some(s)) if a != s)
 }
 
-fn note(best: &mut Option<Error>, e: Error) {
+/// Keep the most telling failure of a search, or end the search: a module
+/// that refused one candidate refuses every other, and its refusal is not a
+/// path's fault (REQ-ERR-001).
+fn note(best: &mut Option<Error>, e: Error) -> Result<()> {
+    if e.kind() == ErrorKind::ModuleState {
+        return Err(e);
+    }
     if best.is_none_or(|b| b.kind() == ErrorKind::UnknownCa) {
         *best = Some(e);
     }
+    Ok(())
 }
 
 impl<'c> Search<'c, '_, '_> {
@@ -2694,11 +2701,11 @@ impl<'c> Search<'c, '_, '_> {
                         Ok(()) => return Ok(ai),
                         Err(e) => {
                             schemes.pop();
-                            note(&mut best, e);
+                            note(&mut best, e)?;
                         }
                     }
                 }
-                Err(e) => note(&mut best, e),
+                Err(e) => note(&mut best, e)?,
             }
         }
 
@@ -2726,11 +2733,11 @@ impl<'c> Search<'c, '_, '_> {
             }
             *budget -= 1;
             if let Err(e) = check_issuer(cand, path.len(), self.opts) {
-                note(&mut best, e);
+                note(&mut best, e)?;
                 continue;
             }
             match check_signature(current, cand.spki, self.opts) {
-                Err(e) => note(&mut best, e),
+                Err(e) => note(&mut best, e)?,
                 Ok(s) => {
                     path.push(i);
                     schemes.push(s);
@@ -2739,7 +2746,7 @@ impl<'c> Search<'c, '_, '_> {
                         Err(e) => {
                             path.pop();
                             schemes.pop();
-                            note(&mut best, e);
+                            note(&mut best, e)?;
                         }
                     }
                 }
@@ -3136,7 +3143,7 @@ pub fn verify_chain_fixed<'a>(
                 })();
                 match result {
                     Ok(ai) => return Ok(ai),
-                    Err(e) => note(&mut best, e),
+                    Err(e) => note(&mut best, e)?,
                 }
             }
             if depth + 1 >= self.opts.limits.max_path_len.min(8) {
@@ -3172,7 +3179,7 @@ pub fn verify_chain_fixed<'a>(
                 })();
                 match result {
                     Ok(ai) => return Ok(ai),
-                    Err(e) => note(&mut best, e),
+                    Err(e) => note(&mut best, e)?,
                 }
                 schemes[depth..].fill(None);
             }

@@ -90,6 +90,9 @@ pub(crate) fn verify(
     signature: &[u8],
 ) -> Result<()> {
     ic_sig::verify(algorithm, key, message, signature).map_err(|e| match e.kind() {
+        ic_core::ErrorKind::ModuleErrorState
+        | ic_core::ErrorKind::SelfTestFailed
+        | ic_core::ErrorKind::NotApprovedInFipsMode => Error::from(e),
         ic_core::ErrorKind::AuthenticationFailed => {
             Error::new(ErrorKind::BadSignature, "signature did not verify")
         }
@@ -118,6 +121,9 @@ pub(crate) fn sign(
             ic_core::ErrorKind::InvalidParameter | ic_core::ErrorKind::InvalidLength => {
                 Error::new(ErrorKind::InvalidConfig, "the signer refused the algorithm")
             }
+            ic_core::ErrorKind::ModuleErrorState
+            | ic_core::ErrorKind::SelfTestFailed
+            | ic_core::ErrorKind::NotApprovedInFipsMode => Error::from(e),
             _ => Error::new(ErrorKind::Crypto, e.context()),
         })?;
     out.truncate(n);

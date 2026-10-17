@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.4.1 (not released)
+
+A failed IronCrypto module is reported as one. No API removed or changed;
+`ErrorKind`, which is non-exhaustive, gains a kind.
+
+### Added
+- `ErrorKind::ModuleState` (`module-state`, REQ-ERR-001): IronCrypto
+  refused because of the module's state, its error state, failed
+  self-tests, or an algorithm not approved in approved mode. It was
+  `crypto` where it was reported at all.
+
+### Fixed
+- REQ-ERR-001: a module that refused was taken for a bad input in four
+  places. Path search noted the refusal as one candidate's failure and went
+  on, and could report an earlier candidate's (an expired intermediate's,
+  say) in its place; it now stops with module-state. An OCSP response was
+  called unsigned, after trying its other responders; a CRL loaded for its
+  issuer was called badly signed; and one checked at validation time was
+  passed over as if it did not verify. All fail closed before and after:
+  nothing was accepted that should not have been. What changes is that the
+  caller is told the module failed, not that the peer sent something bad.
+
+### Verification
+- `tests/error_state.rs` requires module-state of every refusal, with a
+  path whose expired intermediate comes before the good one, and a CRL
+  loaded after the module failed. Each of the five changes reverted alone
+  fails it. The CRL checked at validation time and a delegated OCSP
+  responder's certificate cannot be reached in the error state, since the
+  path's or response's own signature refuses first; they are changed alike
+  and not separately tested.
+
 ## 0.4.0 (2026-10-16)
 
 Moves onto IronCrypto 0.3. Breaking only in that: IronCrypto's types appear

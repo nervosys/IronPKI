@@ -437,8 +437,10 @@ impl CrlStore {
         }
         let scheme = scheme_from_alg(&crl.sig_alg)?;
         let key = sign::public_key(issuer.spki)?;
-        sign::verify(scheme, &key, &crl.tbs, &crl.signature)
-            .map_err(|_| bad("CRL signature does not verify under its issuer's key"))?;
+        sign::verify(scheme, &key, &crl.tbs, &crl.signature).map_err(|e| match e.kind() {
+            ErrorKind::ModuleState => e,
+            _ => bad("CRL signature does not verify under its issuer's key"),
+        })?;
         crl.verified = Some(issuer.spki.to_vec());
         self.crls.push(crl);
         Ok(())
@@ -512,8 +514,13 @@ pub(super) fn check(
         }
         // REQ-CRL-028: verified at load under this very key, or now.
         let preverified = crl.verified.as_deref() == Some(issuer_spki);
-        if !preverified && sign::verify(scheme, &key, &crl.tbs, &crl.signature).is_err() {
-            continue;
+        if !preverified {
+            match sign::verify(scheme, &key, &crl.tbs, &crl.signature) {
+                Ok(()) => {}
+                // REQ-ERR-001: not a CRL that fails to verify.
+                Err(e) if e.kind() == ErrorKind::ModuleState => return Err(e),
+                Err(_) => continue,
+            }
         }
         // REQ-CRL-002: listed in an authentic CRL is revoked, stale or not.
         if crl.revoked.iter().any(|s| s.as_slice() == cert.serial()) {

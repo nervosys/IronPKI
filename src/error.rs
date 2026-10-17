@@ -38,9 +38,14 @@ pub enum ErrorKind {
     InvalidConfig,
     /// The input needs more than the bounds allow.
     CapacityExceeded,
-    /// A cryptographic operation failed for a reason other than the input:
-    /// the module is in its error state, or the random source failed.
+    /// A cryptographic operation failed for a reason other than the input
+    /// or the module's state, such as the random source failing.
     Crypto,
+    /// REQ-ERR-001: IronCrypto refused because of the module's state: it is
+    /// in its error state, its self-tests failed, or the algorithm is not
+    /// approved in its approved mode. Not the input's fault, and nothing
+    /// else is tried once it is seen: no other path, CRL or responder.
+    ModuleState,
     /// A bug in this library.
     Internal,
 }
@@ -62,6 +67,7 @@ impl ErrorKind {
         Self::InvalidConfig,
         Self::CapacityExceeded,
         Self::Crypto,
+        Self::ModuleState,
         Self::Internal,
     ];
 
@@ -82,6 +88,7 @@ impl ErrorKind {
             Self::InvalidConfig => "invalid-config",
             Self::CapacityExceeded => "capacity-exceeded",
             Self::Crypto => "crypto",
+            Self::ModuleState => "module-state",
             Self::Internal => "internal",
         }
     }
@@ -133,6 +140,9 @@ impl From<ic_core::Error> for Error {
         use ic_core::ErrorKind as K;
         let kind = match e.kind() {
             K::AuthenticationFailed => ErrorKind::BadSignature,
+            K::ModuleErrorState | K::SelfTestFailed | K::NotApprovedInFipsMode => {
+                ErrorKind::ModuleState
+            }
             K::MalformedEncoding => ErrorKind::BadCertificate,
             K::Unsupported => ErrorKind::UnsupportedCertificate,
             K::InvalidLength | K::InvalidParameter => ErrorKind::KeyAlgorithmMismatch,

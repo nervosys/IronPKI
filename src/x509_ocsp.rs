@@ -449,7 +449,8 @@ pub fn verify_response(
     let issuer_key = sign::public_key(issuer_spki)?;
     let mut delegated = false;
     let identifies_issuer = rid_tag != T_CTX1 || rid_value == issuer_subject;
-    let mut signed = identifies_issuer && sign::verify(scheme, &issuer_key, tbs, signature).is_ok();
+    let mut signed =
+        identifies_issuer && verified(sign::verify(scheme, &issuer_key, tbs, signature))?;
     if !signed && let Some(mut list) = certs {
         // At most a few attached certificates are tried as delegated
         // responders: each one tried costs a signature verification.
@@ -463,19 +464,17 @@ pub fn verify_response(
             if rid_tag == T_CTX1 && rid_value != responder.subject {
                 continue;
             }
-            if responder_authorized(
+            if verified(responder_authorized(
                 &responder,
                 issuer_subject,
                 &issuer_key,
                 now,
                 allowed_schemes,
-            )
-            .is_ok()
-            {
+            ))? {
                 let Ok(key) = responder.subject_public_key() else {
                     continue;
                 };
-                signed = sign::verify(scheme, &key, tbs, signature).is_ok();
+                signed = verified(sign::verify(scheme, &key, tbs, signature))?;
                 delegated = signed;
             }
         }
@@ -635,9 +634,24 @@ fn responder_authorized(
     }
     // The signature last: it is the costly check, and a candidate without
     // the OCSP-signing purpose never needs it.
-    sign::verify(scheme, issuer_key, responder.tbs, responder.signature)
-        .map_err(|_| bad("responder certificate not signed by the issuer"))?;
+    sign::verify(scheme, issuer_key, responder.tbs, responder.signature).map_err(|e| {
+        match e.kind() {
+            ErrorKind::ModuleState => e,
+            _ => bad("responder certificate not signed by the issuer"),
+        }
+    })?;
     Ok(())
+}
+
+/// Whether a check passed. A refusal for the module's state is an error,
+/// not a signer that failed: no other responder is tried for it, and the
+/// response is not called unsigned (REQ-ERR-001).
+fn verified(r: Result<()>) -> Result<bool> {
+    match r {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == ErrorKind::ModuleState => Err(e),
+        Err(_) => Ok(false),
+    }
 }
 
 /// REQ-OCSP-024: issuance refuses times that exceed the four-digit year range.
