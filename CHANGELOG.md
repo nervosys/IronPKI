@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.1 (not released)
+## 0.4.1 (2026-10-17)
 
 A failed IronCrypto module is reported as one. No API removed or changed;
 `ErrorKind`, which is non-exhaustive, gains a kind.
