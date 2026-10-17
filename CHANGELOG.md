@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.4.0 (not released)
+
+Moves onto IronCrypto 0.3. Breaking only in that: IronCrypto's types appear
+in this crate's interface (`Signer`, `RandomSource`, `SignatureScheme`), so
+a caller has to move to IronCrypto 0.3 with it. Nothing else in the
+interface changed.
+
+### Changed
+- IronCrypto 0.3.1 or later, in place of 0.2.21 or later. Since 0.3.0 its
+  hashes refuse once the module is in its error state. A refused hash is
+  returned as the error it is: making a key identifier, or the CertID
+  hashes of an OCSP response, fails with `crypto`; and an OCSP response is
+  not passed over as naming another certificate because its CertID could
+  not be hashed.
+
+### Verification
+- `tests/error_state.rs`: once IronCrypto is in its error state, no chain
+  validates by either validator, no OCSP response is accepted, and no
+  certificate or response is issued, with a random source that cannot
+  refuse so that what refuses is the signing and hashing. In verification
+  the signature is checked first and refuses first, so the hash refusals
+  are reached only by issuance; the test holds the outcome, not which check
+  gives it.
+
 ## 0.3.0 (2026-10-12)
 
 URI alternative names, read and issued, and PKCS#10 certificate requests,

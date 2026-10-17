@@ -102,13 +102,15 @@ fn bad(context: &'static str) -> Error {
     Error::new(ErrorKind::BadCertificateStatus, context)
 }
 
-fn digest(oid: &[u8], data: &[u8]) -> Option<Vec<u8>> {
+/// A hash of `data` under `oid`, for a CertID this crate builds. A refusal
+/// from IronCrypto, such as its error state, is returned as it is.
+fn digest(oid: &[u8], data: &[u8]) -> Result<Vec<u8>> {
     use ic_core::traits::Digest;
-    Some(match oid {
-        OID_SHA256 => ic_hash::Sha256::digest(data).as_ref().to_vec(),
-        OID_SHA384 => ic_hash::Sha384::digest(data).as_ref().to_vec(),
-        OID_SHA512 => ic_hash::Sha512::digest(data).as_ref().to_vec(),
-        _ => return None,
+    Ok(match oid {
+        OID_SHA256 => ic_hash::Sha256::digest(data)?.as_ref().to_vec(),
+        OID_SHA384 => ic_hash::Sha384::digest(data)?.as_ref().to_vec(),
+        OID_SHA512 => ic_hash::Sha512::digest(data)?.as_ref().to_vec(),
+        _ => return Err(Error::new(ErrorKind::Internal, "hash")),
     })
 }
 
@@ -133,14 +135,18 @@ impl Hashed {
     }
 }
 
-fn digest_fixed(oid: &[u8], data: &[u8]) -> Option<Hashed> {
+/// A hash of `data` under `oid`: `None` for a hash this crate does not
+/// check. A refusal from IronCrypto, such as its error state, is an error,
+/// not a hash it does not check: the response must not be passed over as
+/// if it named another certificate.
+fn digest_fixed(oid: &[u8], data: &[u8]) -> Result<Option<Hashed>> {
     use ic_core::traits::Digest;
-    match oid {
-        OID_SHA256 => Hashed::from_slice(ic_hash::Sha256::digest(data).as_ref()),
-        OID_SHA384 => Hashed::from_slice(ic_hash::Sha384::digest(data).as_ref()),
-        OID_SHA512 => Hashed::from_slice(ic_hash::Sha512::digest(data).as_ref()),
+    Ok(match oid {
+        OID_SHA256 => Hashed::from_slice(ic_hash::Sha256::digest(data)?.as_ref()),
+        OID_SHA384 => Hashed::from_slice(ic_hash::Sha384::digest(data)?.as_ref()),
+        OID_SHA512 => Hashed::from_slice(ic_hash::Sha512::digest(data)?.as_ref()),
         _ => None,
-    }
+    })
 }
 
 /// The `subjectPublicKey` bits of an SPKI: what `issuerKeyHash` hashes.
@@ -504,8 +510,8 @@ pub fn verify_response(
             OID_SHA1 => false,
             OID_SHA256 | OID_SHA384 | OID_SHA512 => {
                 let (Some(n), Some(k)) = (
-                    digest_fixed(single.hash_oid, issuer_subject),
-                    digest_fixed(single.hash_oid, key_bits),
+                    digest_fixed(single.hash_oid, issuer_subject)?,
+                    digest_fixed(single.hash_oid, key_bits)?,
                 ) else {
                     continue;
                 };
@@ -728,10 +734,8 @@ fn build_signed(
         Some(c) => Certificate::parse(c)?.subject,
         None => issuer.subject,
     };
-    let name_hash =
-        digest(OID_SHA384, issuer.subject).ok_or(Error::new(ErrorKind::Internal, "hash"))?;
-    let key_hash = digest(OID_SHA384, spki_key_bits(issuer.spki)?)
-        .ok_or(Error::new(ErrorKind::Internal, "hash"))?;
+    let name_hash = digest(OID_SHA384, issuer.subject)?;
+    let key_hash = digest(OID_SHA384, spki_key_bits(issuer.spki)?)?;
     build_signed_with_cert_id(
         OID_SHA384,
         &name_hash,

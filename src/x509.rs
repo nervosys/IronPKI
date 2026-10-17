@@ -3428,7 +3428,7 @@ fn key_identifier(spki: &[u8]) -> Result<Vec<u8>> {
     let _ = s.expect(T_SEQUENCE)?;
     let key = whole_bits(s.expect(T_BIT_STRING)?)?;
     use ic_core::traits::Digest;
-    let d = ic_hash::Sha256::digest(key);
+    let d = ic_hash::Sha256::digest(key)?;
     Ok(d.as_ref()[..20].to_vec())
 }
 

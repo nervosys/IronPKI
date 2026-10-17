@@ -15,10 +15,10 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 ironpki = { path = ".." }
-ic-core = { version = ">=0.2.21, <0.3" }
-ic-drbg = { version = ">=0.2.21, <0.3" }
-ic-pkix = { version = ">=0.2.21, <0.3" }
-ic-sig = { version = ">=0.2.21, <0.3" }
+ic-core = { version = "0.3.1" }
+ic-drbg = { version = "0.3.1" }
+ic-pkix = { version = "0.3.1" }
+ic-sig = { version = "0.3.1" }
 
 [lib]
 path = "src/lib.rs"
