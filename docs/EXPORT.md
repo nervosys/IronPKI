@@ -27,7 +27,8 @@ The requirement is **15 CFR §742.15(b)**:
 certificates, CRLs and OCSP responses, and writes them. Every signature it
 checks is checked by IronCrypto's `ic-sig`, every signature it makes is made
 by whatever `ic_core::sig::Signer` the caller holds, and every hash is
-IronCrypto's `ic-hash`. It encrypts and decrypts nothing. The formats are
+IronCrypto's `ic-hash`. It encrypts and decrypts nothing, and
+`tests/no_encryption.rs` keeps it so. The formats are
 published standards (section 2).
 
 Two readings follow, and the owner chooses between them:

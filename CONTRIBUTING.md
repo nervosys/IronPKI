@@ -12,6 +12,12 @@
   encoding or a signer goes to
   [nervosys/IronCrypto](https://github.com/nervosys/IronCrypto), not here.
   IronPKI verifies through `ic-sig` and signs through `ic_core::sig::Signer`.
+- **IronPKI encrypts nothing.** If it ever needs keys encrypted at rest
+  (encrypted PKCS#8), it calls IronCrypto's `ic_pkix::pbes2`, once an
+  IronCrypto release contains it. It never implements PBES2, PBKDF2, a cipher
+  or a MAC itself. `tests/no_encryption.rs` fails if `src/` carries their
+  object identifiers or the crate depends directly on `ic-kdf`, `ic-cipher` or
+  `ic-mac`.
 
 ## Rules
 
