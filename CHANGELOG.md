@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.5.0 (2026-11-10)
+
+Requires IronCrypto 0.4.0, below 0.5. Nothing in IronPKI's own API changed,
+but `sign` re-exports IronCrypto's `PublicKey` and `SignatureAlgorithm`, so
+those types are now IronCrypto 0.4's, and a caller on 0.3 must move with it.
+Hence 0.5.0 and not 0.4.2.
+
+### Changed
+- IronCrypto 0.3.1 to 0.4.0. A caret requirement on 0.3 put a second
+  IronCrypto beside 0.4 in a workspace that uses both.
+
+### Verification
+- `tests/no_encryption.rs` fails if `src/` carries the PBES2, PBKDF2,
+  HMAC-SHA-256 or AES-256-CBC object identifiers, dotted or as DER, or if
+  the crate depends directly on ic-kdf, ic-cipher or ic-mac. Keys encrypted
+  at rest are IronCrypto's (`ic_pkix::pbes2`).
+
 ## 0.4.1 (2026-10-17)
 
 A failed IronCrypto module is reported as one. No API removed or changed;

@@ -1,6 +1,6 @@
 [package]
 name = "ironpki"
-version = "0.4.1"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.88"
 license = "AGPL-3.0-or-later"
@@ -13,22 +13,24 @@ categories = ["cryptography", "no-std"]
 publish = true
 
 [dependencies]
-# IronCrypto supplies every primitive and every encoding of one. 0.3.1 is the
-# minimum: from 0.3.0 its hashes refuse once the module is in its error
-# state, as everything else did, and 0.3.1 clears vector registers and dead
-# stack after code that handles secrets.
-ic-core = { version = "0.3.1", default-features = false }
-ic-sig = { version = "0.3.1", default-features = false }
-ic-pkix = { version = "0.3.1", default-features = false }
-ic-hash = { version = "0.3.1", default-features = false }
+# IronCrypto supplies every primitive and every encoding of one. 0.4.0 is the
+# minimum, so a workspace on IronCrypto 0.4 links one copy of it, not 0.3
+# beside it; `sign` re-exports its `PublicKey` and `SignatureAlgorithm`.
+# Earlier floors still hold: from 0.3.0 its hashes refuse once the module is
+# in its error state, and 0.3.1 clears vector registers and dead stack after
+# code that handles secrets.
+ic-core = { version = "0.4.0", default-features = false }
+ic-sig = { version = "0.4.0", default-features = false }
+ic-pkix = { version = "0.4.0", default-features = false }
+ic-hash = { version = "0.4.0", default-features = false }
 
 # The tests issue the chains they validate. Signing is ic-sig's; ic-rsa is
 # here to generate RSA keys, and ic-drbg for randomness.
 [dev-dependencies]
-ic-drbg = { version = "0.3.1", features = ["std"] }
-ic-rsa = { version = "0.3.1" }
+ic-drbg = { version = "0.4.0", features = ["std"] }
+ic-rsa = { version = "0.4.0" }
 # For reading the JSON vector file.
-ic-json = { version = "0.3.1" }
+ic-json = { version = "0.4.0" }
 
 [features]
 default = ["std"]
